@@ -5,6 +5,7 @@
 // (sc-if -> v-if, sc-for -> v-for, {{ }} bindings unchanged) so it stays easy to
 // diff against the reviewed prototype if something looks off.
 import { vm } from './store.js';
+import { isDark, toggleDark } from './theme.js';
 </script>
 
 <template>
@@ -14,6 +15,10 @@ import { vm } from './store.js';
     <a v-for="(n, i) in vm.navItems" :key="i" href="#" :aria-current="n.cur" @click="n.go" style="padding:10px 2px;font-size:15px">{{ n.label }}</a>
     <span class="tag tag-accent" style="margin-left:var(--space-2)">{{ vm.openCountLabel }}</span>
     <span style="font-size:12px;letter-spacing:0.08em;color:var(--color-neutral-600)">{{ vm.dayLabel }}</span>
+    <button type="button" class="btn btn-ghost" @click="toggleDark" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" style="min-width:36px;min-height:36px;padding:0">
+      <svg v-if="!isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>
+    </button>
   </nav>
 
   <!-- Tabs list -->
