@@ -3,4 +3,7 @@ node_modules/
 dist/
 build/
 android/app/build/
+android/.gradle/
+android/local.properties
 *.log
+builds/*.apk
