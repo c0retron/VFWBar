@@ -4,6 +4,7 @@
 // than stylistic cleanup. See ../DESIGN_NOTES.md for the reasoning behind the
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
+import { enqueueDaySync } from './sync.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
@@ -202,6 +203,23 @@ class PosStore {
 
   closeDay(summary) {
     this.mut((db) => {
+      const DN = db.dayNumber;
+      const dayStart = this.date(DN);
+      // Snapshot this day's detail into the summary, resolved to human-readable
+      // names rather than internal ids — this is what gets synced to Sheets,
+      // and db.sales gets pruned below, so the summary is the only durable
+      // record of a given day's line items past the 6000-row cap.
+      summary.salesRows = db.sales.filter((x) => x.d === DN).map((x) => {
+        const p = db.products.find((pp) => pp.id === x.p);
+        const c = x.c ? db.customers.find((cc) => cc.id === x.c) : null;
+        return { hour: x.h, product: p ? p.name : x.p, category: p ? p.cat : '', customer: c ? c.name : 'Walk-in', qty: x.q, price: x.pr, pay: x.pay };
+      });
+      const bookRows = [];
+      db.customers.forEach((c) => {
+        c.ledger.forEach((e) => { if (e.ts >= dayStart) bookRows.push({ ts: e.ts, customer: c.name, kind: e.kind, amount: e.amount, method: e.method || '', note: e.note || '' }); });
+      });
+      summary.bookRows = bookRows;
+      summary.synced = false;
       db.days.push(summary);
       db.dayNumber++;
       db.todayBookPays = [];
@@ -211,6 +229,7 @@ class PosStore {
     });
     this.state.bills = { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 };
     this.state.dlg = { kind: 'dayClosed', summary };
+    enqueueDaySync(summary);
   }
 
   depositPlan(counts, target) {

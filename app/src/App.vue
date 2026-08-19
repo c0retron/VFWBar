@@ -4,8 +4,24 @@
 // exactly — see src/store.js. Template structure below mirrors the original 1:1
 // (sc-if -> v-if, sc-for -> v-for, {{ }} bindings unchanged) so it stays easy to
 // diff against the reviewed prototype if something looks off.
+import { ref, computed } from 'vue';
 import { vm } from './store.js';
 import { isDark, toggleDark } from './theme.js';
+import { syncState, getConfig, setConfig, retrySync } from './sync.js';
+
+const initialCfg = getConfig();
+const sheetsUrl = ref(initialCfg.url);
+const sheetsSecret = ref(initialCfg.secret);
+function saveSheetsConfig() { setConfig(sheetsUrl.value, sheetsSecret.value); }
+
+const syncStatusLabel = computed(() => {
+  if (!syncState.configured) return 'Not set up yet — paste in the Web App URL above and save.';
+  if (syncState.status === 'syncing') return 'Syncing…';
+  if (syncState.status === 'error') return "Couldn't reach the sheet (" + syncState.lastError + ') — ' + syncState.pendingCount + ' day(s) waiting, will retry.';
+  if (syncState.pendingCount > 0) return syncState.pendingCount + ' day(s) waiting to sync.';
+  if (syncState.lastSyncAt) return 'Synced — last at ' + new Date(syncState.lastSyncAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return 'Ready. Syncs automatically each time you close a day.';
+});
 </script>
 
 <template>
@@ -389,8 +405,15 @@ import { isDark, toggleDark } from './theme.js';
       </div>
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <div class="card-kicker">Where the data lives</div>
-        <p class="card-body" style="margin:0">This app saves everything on the tablet and works offline. A background sync copies each day's sales, book entries and close-out sheet to a Google Sheet you can open on any computer.</p>
+        <div class="card-kicker">Google Sheets sync</div>
+        <p class="card-body" style="margin:0">This app saves everything on the tablet and works offline. Each day's sales, book entries and close-out sheet sync here in the background when you close the day. See google-apps-script/SETUP.md for one-time setup.</p>
+        <div class="field"><label>Web App URL</label><input class="input" placeholder="https://script.google.com/macros/s/…/exec" v-model="sheetsUrl" style="min-height:44px"></div>
+        <div class="field"><label>Shared secret</label><input class="input" type="password" v-model="sheetsSecret" style="min-height:44px"></div>
+        <div style="display:flex;gap:var(--space-1)">
+          <button type="button" class="btn" @click="saveSheetsConfig" style="min-height:44px">Save</button>
+          <button type="button" class="btn btn-ghost" @click="retrySync" :disabled="!syncState.configured" style="min-height:44px">Sync now</button>
+        </div>
+        <div style="font-size:12px;color:var(--color-neutral-600)">{{ syncStatusLabel }}</div>
       </div>
       <button type="button" class="btn btn-ghost" @click="vm.resetDemo" style="min-height:44px;color:var(--color-accent-700)">Reset demo data</button>
     </div>
