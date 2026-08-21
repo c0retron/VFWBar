@@ -99,7 +99,7 @@ const syncStatusLabel = computed(() => {
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto;padding:var(--space-2) 0">
         <p v-if="vm.detEmpty" style="color:var(--color-neutral-600);padding:var(--space-3) 0">Nothing yet — tap drinks on the right.</p>
-        <div v-for="(it, i) in vm.detItems" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
+        <div v-for="(it, i) in vm.detItems" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;border-bottom:1px solid var(--mix-text-22)">
           <span v-if="it.canQty" style="display:inline-flex;align-items:center;gap:2px">
             <button type="button" class="btn btn-ghost" @click="it.dec" aria-label="less" style="min-width:44px;min-height:44px;font-size:20px">−</button>
             <span style="font-family:var(--font-heading);font-size:19px;min-width:26px;text-align:center">{{ it.qty }}</span>
@@ -299,7 +299,7 @@ const syncStatusLabel = computed(() => {
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div class="card-kicker">{{ vm.coDate }}</div>
           <div style="display:flex;flex-direction:column">
-            <div v-for="(r, i) in vm.coRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent);font-size:14px">
+            <div v-for="(r, i) in vm.coRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--mix-text-22);font-size:14px">
               <span :style="`color:${r.col}`">{{ r.label }}</span><span :style="`font-weight:${r.wt}`">{{ r.amt }}</span>
             </div>
             <div style="display:flex;justify-content:space-between;padding:10px 0 2px;font-family:var(--font-heading);font-size:19px">
@@ -321,7 +321,7 @@ const syncStatusLabel = computed(() => {
         <div class="card blueprint">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div style="display:flex;flex-direction:column">
-            <div v-for="(b, i) in vm.billRows" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:4px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
+            <div v-for="(b, i) in vm.billRows" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:4px 0;border-bottom:1px solid var(--mix-text-22)">
               <span style="width:48px;font-family:var(--font-heading);font-size:18px">{{ b.label }}</span>
               <button type="button" class="btn btn-ghost" @click="b.dec" aria-label="less" style="min-width:44px;min-height:44px;font-size:20px">−</button>
               <input class="input" type="number" min="0" :value="b.count" @change="b.onSet" style="width:70px;min-height:44px;text-align:center;font-size:16px">
@@ -391,7 +391,7 @@ const syncStatusLabel = computed(() => {
         <button type="button" class="btn" @click="vm.addRegular" style="min-height:44px">Add</button>
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
-        <div v-for="(r, i) in vm.regRows" :key="i" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
+        <div v-for="(r, i) in vm.regRows" :key="i" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--mix-text-22)">
           <span style="font-size:15px">{{ r.name }}</span>
           <span style="font-size:12px;color:var(--color-neutral-600)">{{ r.sub }}</span>
         </div>
@@ -565,7 +565,7 @@ const syncStatusLabel = computed(() => {
       <div class="dialog-title">{{ vm.dayClosedTitle }}</div>
       <p class="dialog-body" style="margin:0">The binder sheet, filled out for you:</p>
       <div style="display:flex;flex-direction:column">
-        <div v-for="(r, i) in vm.dayClosedRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent);font-size:14px">
+        <div v-for="(r, i) in vm.dayClosedRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--mix-text-22);font-size:14px">
           <span>{{ r.label }}</span><span :style="`font-weight:${r.wt}`">{{ r.val }}</span>
         </div>
       </div>
