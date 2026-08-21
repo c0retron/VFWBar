@@ -7,7 +7,7 @@
   --color-text: #1d1f20;
   --color-accent: #5980a6;
   --color-accent-2: #728fab;
-  --color-divider: color-mix(in srgb, #1d1f20 16%, transparent);
+  --color-divider: color-mix(in srgb, #1d1f20 34%, transparent);
 
   /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
      same step of any role matches the others in visual value. */
@@ -73,7 +73,7 @@
   --color-text: #eef0f1;
   --color-accent: #94bce3;
   --color-accent-2: #9ebbd8;
-  --color-divider: color-mix(in srgb, #eef0f1 16%, transparent);
+  --color-divider: color-mix(in srgb, #eef0f1 34%, transparent);
 
   --color-neutral-100: #2b2b2d;
   --color-neutral-200: #424244;
@@ -119,7 +119,7 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: var(--font-headi
 
 .blueprint {
   position: relative;
-  border: 1px solid var(--color-divider);
+  border: 1.5px solid var(--color-divider);
   border-radius: 0;
 }
 /* The overlay image treatments (halftone, duotone) clip their overlay
@@ -129,13 +129,13 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: var(--font-headi
 .blueprint.halftone, .blueprint.plate, .blueprint.duotone { overflow: visible; }
 .blueprint > .corner {
   position: absolute; width: 11px; height: 11px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
+  color: color-mix(in srgb, var(--color-text) 75%, transparent);
 }
 .blueprint > .corner::before, .blueprint > .corner::after {
   content: ""; position: absolute; background: currentColor;
 }
-.blueprint > .corner::before { left: 5px; top: 0; width: 1px; height: 100%; }
-.blueprint > .corner::after  { top: 5px; left: 0; width: 100%; height: 1px; }
+.blueprint > .corner::before { left: 5px; top: 0; width: 1.5px; height: 100%; }
+.blueprint > .corner::after  { top: 5px; left: 0; width: 100%; height: 1.5px; }
 .blueprint > .corner.tl { top: -6px; left: -6px; }
 .blueprint > .corner.tr { top: -6px; right: -6px; }
 .blueprint > .corner.bl { bottom: -6px; left: -6px; }
@@ -217,7 +217,7 @@ figcaption {
   width: 100%; min-height: 36px; padding: 6px 10px; font: inherit;
   font-size: 14px; color: var(--color-text); caret-color: var(--color-accent);
   background: var(--color-surface);
-  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+  border: 1.5px solid var(--color-divider); border-radius: var(--radius-md);
 }
 .input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
 .input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
@@ -238,13 +238,13 @@ textarea.input { min-height: 90px; resize: vertical; }
 .radio input:focus-visible + .dot { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .seg {
   display: inline-flex; overflow: hidden;
-  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+  border: 1.5px solid var(--color-divider); border-radius: var(--radius-md);
 }
 .seg-opt {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 7px 12px; font-size: 13px; cursor: pointer;
 }
-.seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+.seg-opt + .seg-opt { border-left: 1.5px solid var(--color-divider); }
 .seg-opt:has(input:checked) { background: var(--color-accent); color: var(--color-bg); }
 .seg-opt:not(:has(input:checked)):hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
 .seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
@@ -301,7 +301,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 }
 .table td {
   padding: var(--space-2);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 22%, transparent);
 }
 .table tbody tr:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
 
@@ -326,8 +326,8 @@ textarea.input { min-height: 90px; resize: vertical; }
 /* — blueprint frame: components are wireframe objects (see .blueprint
      and .corner above) — square, transparent, hairline-bordered — */
 .card, .btn, .input, .tag, .seg, .dialog { border-radius: 0; }
-.card, .dialog { background: transparent; border: 1px solid var(--color-divider); }
-.btn { border: 1px solid var(--color-divider); }
+.card, .dialog { background: transparent; border: 1.5px solid var(--color-divider); }
+.btn { border: 1.5px solid var(--color-divider); }
 .btn-primary { border-color: var(--color-accent); }
 .btn-ghost { border-color: transparent; }
 

@@ -26,7 +26,7 @@ const syncStatusLabel = computed(() => {
 
 <template>
 <div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;font-variant-numeric:tabular-nums">
-  <nav class="nav" style="border-bottom:1px solid var(--color-divider);flex:none">
+  <nav class="nav" style="border-bottom:1.5px solid var(--color-divider);flex:none">
     <span class="nav-brand">VFW CANTEEN</span>
     <a v-for="(n, i) in vm.navItems" :key="i" href="#" :aria-current="n.cur" @click="n.go" style="padding:10px 2px;font-size:15px">{{ n.label }}</a>
     <span class="tag tag-accent" style="margin-left:var(--space-2)">{{ vm.openCountLabel }}</span>
@@ -61,7 +61,7 @@ const syncStatusLabel = computed(() => {
         <p class="card-body" style="margin:0">Start one from the panel on the right — tap a regular or ring a walk-in guest.</p>
       </div>
     </div>
-    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin: 0; color: var(--color-accent-700); font-size: 16px">Start a tab</h6>
       <div style="display:flex;gap:var(--space-1)">
         <input class="input" placeholder="Name…" :value="vm.startName" @change="vm.onStartName" @keydown="vm.onStartKey" style="min-height:44px">
@@ -88,7 +88,7 @@ const syncStatusLabel = computed(() => {
   <!-- Tab detail -->
   <div v-if="vm.viewTabDetail" style="flex:1;min-height:0;display:flex;gap:var(--space-4);padding:var(--space-4)">
     <div style="flex:1;min-width:0;display:flex;flex-direction:column">
-      <div style="display:flex;align-items:center;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1px solid var(--color-divider)">
+      <div style="display:flex;align-items:center;gap:var(--space-2);padding-bottom:var(--space-3);border-bottom:1.5px solid var(--color-divider)">
         <button type="button" class="btn btn-ghost" @click="vm.backToTabs" style="min-height: 44px; font-size: 18px; border-width: 1px; border-style: solid; border-color: #000000">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width: 32px; height: 31px"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
           Tabs
@@ -99,7 +99,7 @@ const syncStatusLabel = computed(() => {
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto;padding:var(--space-2) 0">
         <p v-if="vm.detEmpty" style="color:var(--color-neutral-600);padding:var(--space-3) 0">Nothing yet — tap drinks on the right.</p>
-        <div v-for="(it, i) in vm.detItems" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 8%, transparent)">
+        <div v-for="(it, i) in vm.detItems" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
           <span v-if="it.canQty" style="display:inline-flex;align-items:center;gap:2px">
             <button type="button" class="btn btn-ghost" @click="it.dec" aria-label="less" style="min-width:44px;min-height:44px;font-size:20px">−</button>
             <span style="font-family:var(--font-heading);font-size:19px;min-width:26px;text-align:center">{{ it.qty }}</span>
@@ -120,7 +120,7 @@ const syncStatusLabel = computed(() => {
           </button>
         </div>
       </div>
-      <div style="border-top:1px solid var(--color-divider);padding-top:var(--space-3);display:flex;align-items:center;gap:var(--space-2)">
+      <div style="border-top:1.5px solid var(--color-divider);padding-top:var(--space-3);display:flex;align-items:center;gap:var(--space-2)">
         <button type="button" class="btn" @click="vm.openRound" style="min-height:48px">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 11h1a3 3 0 0 1 0 6h-1"></path><path d="M9 12v6"></path><path d="M13 12v6"></path><path d="M14 7.5c-1 0-1.44.5-3 .5s-2-.5-3-.5-1.72.5-2.5.5a2.5 2.5 0 0 1 0-5c.78 0 1.57.5 2.5.5S9.44 2 11 2s2 1.5 3 1.5 1.72-.5 2.5-.5a2.5 2.5 0 0 1 0 5c-.78 0-1.5-.5-2.5-.5Z"></path><path d="M5 8v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path></svg>
           Buy a round
@@ -134,7 +134,7 @@ const syncStatusLabel = computed(() => {
         </button>
       </div>
     </div>
-    <div style="flex:none;width:340px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:340px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <div v-if="vm.hasCredits" style="border:1px solid #a3781f;padding:var(--space-2);font-size:13px;color:#7a5c12">{{ vm.creditBanner }}</div>
       <template v-if="vm.hasUsuals">
         <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700)">{{ vm.usualsTitle }}</div>
@@ -178,7 +178,7 @@ const syncStatusLabel = computed(() => {
         </table>
       </div>
     </div>
-    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker" style="font-size: 14px">Owed to the canteen</div>
@@ -217,7 +217,7 @@ const syncStatusLabel = computed(() => {
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">Sales by day of week · last 30 days</div>
-        <div style="display:flex;align-items:flex-end;gap:var(--space-2);height:150px;border-bottom:1px solid var(--color-divider);padding-top:var(--space-2)">
+        <div style="display:flex;align-items:flex-end;gap:var(--space-2);height:150px;border-bottom:1.5px solid var(--color-divider);padding-top:var(--space-2)">
           <div v-for="(b, i) in vm.dowBars" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%" :title="b.amt">
             <span style="font-size:11px;color:var(--color-neutral-600)">{{ b.amt }}</span>
             <div :style="`width:70%;height:${b.h}%;background:${b.bg}`"></div>
@@ -230,7 +230,7 @@ const syncStatusLabel = computed(() => {
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">Busiest hours · drinks rung, last 30 days</div>
-        <div style="display:flex;align-items:flex-end;gap:3px;height:150px;border-bottom:1px solid var(--color-divider);padding-top:var(--space-2)">
+        <div style="display:flex;align-items:flex-end;gap:3px;height:150px;border-bottom:1.5px solid var(--color-divider);padding-top:var(--space-2)">
           <div v-for="(b, i) in vm.hourBars" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%" :title="b.amt">
             <div :style="`width:100%;height:${b.h}%;background:${b.bg}`"></div>
           </div>
@@ -244,7 +244,7 @@ const syncStatusLabel = computed(() => {
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">Daily sales · last 30 days</div>
-        <div style="display:flex;align-items:flex-end;gap:2px;height:130px;border-bottom:1px solid var(--color-divider);padding-top:var(--space-2)">
+        <div style="display:flex;align-items:flex-end;gap:2px;height:130px;border-bottom:1.5px solid var(--color-divider);padding-top:var(--space-2)">
           <div v-for="(b, i) in vm.dailyBars" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%" :title="b.title">
             <div :style="`width:100%;height:${b.h}%;background:${b.bg}`"></div>
           </div>
@@ -299,7 +299,7 @@ const syncStatusLabel = computed(() => {
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div class="card-kicker">{{ vm.coDate }}</div>
           <div style="display:flex;flex-direction:column">
-            <div v-for="(r, i) in vm.coRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 8%, transparent);font-size:14px">
+            <div v-for="(r, i) in vm.coRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent);font-size:14px">
               <span :style="`color:${r.col}`">{{ r.label }}</span><span :style="`font-weight:${r.wt}`">{{ r.amt }}</span>
             </div>
             <div style="display:flex;justify-content:space-between;padding:10px 0 2px;font-family:var(--font-heading);font-size:19px">
@@ -321,7 +321,7 @@ const syncStatusLabel = computed(() => {
         <div class="card blueprint">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div style="display:flex;flex-direction:column">
-            <div v-for="(b, i) in vm.billRows" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:4px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 8%, transparent)">
+            <div v-for="(b, i) in vm.billRows" :key="i" style="display:flex;align-items:center;gap:var(--space-2);padding:4px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
               <span style="width:48px;font-family:var(--font-heading);font-size:18px">{{ b.label }}</span>
               <button type="button" class="btn btn-ghost" @click="b.dec" aria-label="less" style="min-width:44px;min-height:44px;font-size:20px">−</button>
               <input class="input" type="number" min="0" :value="b.count" @change="b.onSet" style="width:70px;min-height:44px;text-align:center;font-size:16px">
@@ -384,20 +384,20 @@ const syncStatusLabel = computed(() => {
         </table>
       </div>
     </div>
-    <div style="flex:none;width:280px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:280px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin:0;color:var(--color-accent-700)">Regulars</h6>
       <div style="display:flex;gap:var(--space-1)">
         <input class="input" placeholder="Add a regular…" :value="vm.newRegName" @change="vm.onNewRegName" style="min-height:44px">
         <button type="button" class="btn" @click="vm.addRegular" style="min-height:44px">Add</button>
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
-        <div v-for="(r, i) in vm.regRows" :key="i" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 8%, transparent)">
+        <div v-for="(r, i) in vm.regRows" :key="i" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent)">
           <span style="font-size:15px">{{ r.name }}</span>
           <span style="font-size:12px;color:var(--color-neutral-600)">{{ r.sub }}</span>
         </div>
       </div>
     </div>
-    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin:0;color:var(--color-accent-700)">Settings</h6>
       <div class="field">
         <label>Till change target</label>
@@ -565,7 +565,7 @@ const syncStatusLabel = computed(() => {
       <div class="dialog-title">{{ vm.dayClosedTitle }}</div>
       <p class="dialog-body" style="margin:0">The binder sheet, filled out for you:</p>
       <div style="display:flex;flex-direction:column">
-        <div v-for="(r, i) in vm.dayClosedRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 8%, transparent);font-size:14px">
+        <div v-for="(r, i) in vm.dayClosedRows" :key="i" style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid color-mix(in srgb, var(--color-text) 22%, transparent);font-size:14px">
           <span>{{ r.label }}</span><span :style="`font-weight:${r.wt}`">{{ r.val }}</span>
         </div>
       </div>
