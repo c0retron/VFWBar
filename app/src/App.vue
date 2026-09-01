@@ -361,7 +361,10 @@ const syncStatusLabel = computed(() => {
   <div v-if="vm.viewClose" style="flex:1;min-height:0;overflow-y:auto;padding:var(--space-4)">
     <div style="display:grid;grid-template-columns:1fr 1.1fr 1fr;gap:var(--space-4);align-items:start">
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <h6 style="margin:0;color:var(--color-accent-700)">Day summary</h6>
+        <div style="display:flex;align-items:center;gap:var(--space-2)">
+          <h6 style="margin:0;color:var(--color-accent-700)">Day summary</h6>
+          <button type="button" class="btn btn-ghost" @click="vm.openTabsOverview" style="margin-left:auto;min-height:36px;font-size:12px">View all tabs</button>
+        </div>
         <div class="card blueprint">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div class="card-kicker">{{ vm.coDate }}</div>
@@ -635,6 +638,27 @@ const syncStatusLabel = computed(() => {
           Start day {{ vm.nextDayNum }}
         </button>
       </div>
+    </div>
+
+    <div v-if="vm.dlgTabsOverview" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg);width:min(760px,100%)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div class="dialog-title">Today's tabs</div>
+      <p v-if="!vm.tabsOverviewRows.length" class="dialog-body" style="margin:0;color:var(--color-neutral-600)">No tabs yet today.</p>
+      <div v-else style="max-height:420px;overflow-y:auto">
+        <table class="table">
+          <thead><tr><th>Name</th><th>Status</th><th>Ordered</th><th style="text-align:right">Total</th><th style="text-align:right">When</th></tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in vm.tabsOverviewRows" :key="i">
+              <td style="font-size:15px">{{ r.name }}</td>
+              <td><span class="tag" :style="r.statusStyle">{{ r.status }}</span></td>
+              <td style="font-size:13px;color:var(--color-neutral-600)">{{ r.itemsList }}</td>
+              <td style="text-align:right">{{ r.total }}</td>
+              <td style="text-align:right;font-size:12px;color:var(--color-neutral-600);white-space:nowrap">{{ r.when }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions"><button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Close</button></div>
     </div>
   </div>
 </div>

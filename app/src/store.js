@@ -28,6 +28,7 @@ class PosStore {
         if (db.v === 1) {
           db.tabs.forEach((t) => { if (!t.credits) t.credits = []; });
           if (db.cardTips == null) db.cardTips = 0;
+          if (!db.closedTabs) db.closedTabs = [];
           return db;
         }
       }
@@ -35,6 +36,7 @@ class PosStore {
     const db = this.seed();
     db.tabs.forEach((t) => { if (!t.credits) t.credits = []; });
     if (db.cardTips == null) db.cardTips = 0;
+    if (!db.closedTabs) db.closedTabs = [];
     return db;
   }
 
@@ -101,7 +103,7 @@ class PosStore {
       { id: 't2', name: 'Mac', custId: 'c3', openedAt: now - 31 * 6e4, items: [{ id: 'i3', prodId: 'p1', name: 'Budweiser', price: 2.75, qty: 1, comp: false }] },
       { id: 't3', name: 'Guest 1', custId: null, openedAt: now - 12 * 6e4, items: [{ id: 'i4', prodId: 'p5', name: 'Mich Ultra', price: 3, qty: 1, comp: false }, { id: 'i5', prodId: 'p17', name: 'Chips', price: 1, qty: 1, comp: false }] },
     ];
-    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [] };
+    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [] };
   }
 
   bookBal(c) { return c.ledger.reduce((a, e) => a + (e.kind === 'charge' ? e.amount : -e.amount), 0); }
@@ -197,6 +199,20 @@ class PosStore {
         const amt = this.tabTotal(t) + roundCharge;
         if (amt > 0) c.ledger.push({ ts: Date.now(), kind: 'charge', amount: Math.round(amt * 100) / 100, note: 'Bar tab' });
       }
+      // Once a tab closes it's gone from db.tabs entirely -- only its
+      // individual sales rows survive, with no record of which tab they came
+      // from. Snapshot it here so "today's tabs" (see openTabsOverview) can
+      // show closed tabs alongside open ones. Reset each day in closeDay(),
+      // same as todayBookPays -- this is a same-day activity log, not
+      // permanent history (that's what the Sheet sync is for).
+      const givenOutN = roundCharge > 0 && last ? Math.round(roundCharge / last.price) : 0;
+      db.closedTabs.push({
+        id: t.id, name: t.name, custId: t.custId, closedAt: Date.now(), method,
+        tip: method === 'card' ? tip : 0,
+        total: Math.round((this.tabTotal(t) + roundCharge) * 100) / 100,
+        items: t.items.map((i) => ({ name: i.name, qty: i.qty, price: i.price, comp: !!i.comp, covered: !!i.covered, roundFrom: i.roundFrom || null })),
+        roundNote: givenOutN > 0 ? givenOutN + ' × ' + last.name + ' (round)' : '',
+      });
       db.tabs = db.tabs.filter((x) => x.id !== t.id);
     });
     Object.assign(this.state, { activeTabId: null, dlg: null, tender: null, tenderCustom: '', tip: 0, tipCustom: '' });
@@ -232,6 +248,7 @@ class PosStore {
       db.todayBookPays = [];
       db.cardTips = 0;
       db.guestSeq = 1;
+      db.closedTabs = [];
       if (db.sales.length > 6000) db.sales = db.sales.filter((x) => x.d > db.dayNumber - 120);
     });
     this.state.bills = { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 };
@@ -355,6 +372,7 @@ class PosStore {
       db.customers = customers;
       db.sales = sales;
       db.tabs = [];
+      db.closedTabs = [];
       db.todayBookPays = [];
       db.cardTips = 0;
       db.guestSeq = 1;
@@ -605,6 +623,18 @@ function renderVals() {
     };
     store.closeDay(summary);
   };
+  const itemsListFor = (items) => (items || []).map((i) => {
+    const note = i.covered ? ' ★from ' + i.roundFrom : i.comp ? ' (comp)' : '';
+    return i.qty + '× ' + i.name + note;
+  }).join(', ') || '—';
+  const tabsOverviewRows = openTabs.map((t) => ({
+    name: t.name, status: 'Open', statusStyle: 'border:1px solid var(--color-accent);color:var(--color-accent)',
+    itemsList: itemsListFor(t.items), total: fmt(store.tabTotal(t)), when: 'opened ' + store.fmtTime(t.openedAt),
+  })).concat(db.closedTabs.slice().reverse().map((ct) => ({
+    name: ct.name, status: ct.method === 'cash' ? 'Cash' : ct.method === 'card' ? 'Card' : 'Book', statusStyle: 'border:1px solid var(--color-divider);color:var(--color-neutral-600)',
+    itemsList: itemsListFor(ct.items) + (ct.roundNote ? ', ' + ct.roundNote : ''), total: fmt(ct.total), when: 'closed ' + store.fmtTime(ct.closedAt),
+  })));
+  const openTabsOverview = () => set({ dlg: { kind: 'tabsOverview' } });
 
   const dlg = S.dlg || {};
   const dlgOpen = !!S.dlg;
@@ -613,6 +643,7 @@ function renderVals() {
     dlgOpen, closeDlg, backdropClick: () => set({ dlg: null }), eatClick: (e) => e.stopPropagation(),
     dlgClose: dlg.kind === 'close', dlgTransfer: dlg.kind === 'transfer', dlgRound: dlg.kind === 'round',
     dlgLedger: dlg.kind === 'ledger', dlgBookAct: dlg.kind === 'bookAct', dlgEditProduct: dlg.kind === 'editProduct', dlgDayClosed: dlg.kind === 'dayClosed',
+    dlgTabsOverview: dlg.kind === 'tabsOverview',
   };
   if (dlg.kind === 'close' && activeTab) {
     const c = activeTab.custId ? store.cust(activeTab.custId) : null;
@@ -801,6 +832,7 @@ function renderVals() {
     hasDepNote, depositNote,
     hasOpenTabsWarn: openTabs.length > 0, openTabNames: openNames,
     closeDayDisabled: !canClose, closeDayHint, doCloseDay,
+    tabsOverviewRows, openTabsOverview,
     prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer' } }),
     tillVal: String(db.tillTarget), onTill: (e) => store.mut((d) => { d.tillTarget = Math.max(50, Number(e.target.value) || 200); }),
     resetDemo: () => store.resetDemo(),
