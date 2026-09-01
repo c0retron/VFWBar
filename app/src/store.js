@@ -4,10 +4,20 @@
 // than stylistic cleanup. See ../DESIGN_NOTES.md for the reasoning behind the
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
-import { enqueueDaySync, enqueueProductsSync } from './sync.js';
+import { enqueueDaySync, enqueueProductsSync, enqueueShoppingListSync } from './sync.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
+
+// How many drink-units one shopping-order unit represents -- beer/soda come
+// in 24-packs, liquor and wine get poured from one bottle. Just a starting
+// default per category; adjustable per product in Admin.
+function restockUnitFor(cat) {
+  if (cat === 'Beer' || cat === 'Soda') return 24;
+  if (cat === 'Liquor') return 12;
+  if (cat === 'Wine') return 4;
+  return 1;
+}
 
 class PosStore {
   constructor() {
@@ -29,6 +39,7 @@ class PosStore {
           db.tabs.forEach((t) => { if (!t.credits) t.credits = []; });
           if (db.cardTips == null) db.cardTips = 0;
           if (!db.closedTabs) db.closedTabs = [];
+          this.backfillInventory(db);
           return db;
         }
       }
@@ -38,6 +49,16 @@ class PosStore {
     if (db.cardTips == null) db.cardTips = 0;
     if (!db.closedTabs) db.closedTabs = [];
     return db;
+  }
+
+  // Fills in inventory fields for products saved before this feature existed.
+  backfillInventory(db) {
+    db.products.forEach((p) => {
+      if (p.qty == null) p.qty = 0;
+      if (p.unitsPerSale == null) p.unitsPerSale = 1;
+      if (p.restockUnit == null) p.restockUnit = restockUnitFor(p.cat);
+    });
+    if (!db.shoppingLists) db.shoppingLists = [];
   }
 
   save() { try { localStorage.setItem(KEY, JSON.stringify(this.db)); } catch (e) { /* storage full/unavailable */ } }
@@ -52,8 +73,15 @@ class PosStore {
   seed() {
     let s = 42;
     const R = () => { s |= 0; s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-    const defs = [['Bud Light', 'Beer', 2.75], ['Budweiser', 'Beer', 2.75], ['Miller Lite', 'Beer', 2.75], ['Coors Light', 'Beer', 2.75], ['Busch Draft', 'Beer', 2.00], ['Mich Ultra', 'Beer', 3.00], ['Well Shot', 'Liquor', 3.00], ['Call Shot', 'Liquor', 4.25], ['Top Shelf', 'Liquor', 5.50], ['Mixed Drink', 'Liquor', 3.50], ['House Red', 'Wine', 3.50], ['House White', 'Wine', 3.50], ['Soda', 'Soda', 1.00], ['Coffee', 'Soda', 0.75], ['Bottled Water', 'Soda', 1.00], ['Hot Dog', 'Food', 2.00], ['Frozen Pizza', 'Food', 6.00], ['Chips', 'Food', 1.00], ['Pickled Egg', 'Food', 1.00]];
-    const products = defs.map((d, i) => ({ id: 'p' + i, name: d[0], cat: d[1], price: d[2], active: true }));
+    const defs = [['Bud Light', 'Beer', 2.75, 36], ['Budweiser', 'Beer', 2.75, 24], ['Miller Lite', 'Beer', 2.75, 24], ['Coors Light', 'Beer', 2.75, 24], ['Busch Draft', 'Beer', 2.00, 24], ['Mich Ultra', 'Beer', 3.00, 12], ['Well Shot', 'Liquor', 3.00, 24], ['Call Shot', 'Liquor', 4.25, 12], ['Top Shelf', 'Liquor', 5.50, 12], ['Mixed Drink', 'Liquor', 3.50, 24], ['House Red', 'Wine', 3.50, 8], ['House White', 'Wine', 3.50, 8], ['Soda', 'Soda', 1.00, 24], ['Coffee', 'Soda', 0.75, 24], ['Bottled Water', 'Soda', 1.00, 24], ['Hot Dog', 'Food', 2.00, 20], ['Frozen Pizza', 'Food', 6.00, 10], ['Chips', 'Food', 1.00, 20], ['Pickled Egg', 'Food', 1.00, 30]];
+    // qty is current inventory in "drinks" (decimal -- a mixed drink can use
+    // more than one unit's worth of liquor per sale, see unitsPerSale).
+    // restockUnit is how many drink-units one shopping-list order unit adds
+    // back (a case of beer, a bottle of liquor).
+    const products = defs.map((d, i) => ({
+      id: 'p' + i, name: d[0], cat: d[1], price: d[2], active: true,
+      qty: d[3], unitsPerSale: d[0] === 'Mixed Drink' ? 1.5 : 1, restockUnit: restockUnitFor(d[1]),
+    }));
     const regs = [['Cory', 95], ['Paul', 88], ['Charlie', 80], ['Mac', 74], ['Tom', 66], ['Jim', 60], ['Liz', 52], ['Conrad', 44], ['Fulkerson', 38]];
     const customers = regs.map((r, i) => ({ id: 'c' + i, name: r[0], ledger: [] }));
     const prefs = [[0, 6, 15], [4, 2, 17], [2, 16, 12], [1, 7, 15], [10, 8, 18], [4, 6, 13], [11, 9, 12], [5, 14, 16], [3, 6, 17]];
@@ -103,7 +131,7 @@ class PosStore {
       { id: 't2', name: 'Mac', custId: 'c3', openedAt: now - 31 * 6e4, items: [{ id: 'i3', prodId: 'p1', name: 'Budweiser', price: 2.75, qty: 1, comp: false }] },
       { id: 't3', name: 'Guest 1', custId: null, openedAt: now - 12 * 6e4, items: [{ id: 'i4', prodId: 'p5', name: 'Mich Ultra', price: 3, qty: 1, comp: false }, { id: 'i5', prodId: 'p17', name: 'Chips', price: 1, qty: 1, comp: false }] },
     ];
-    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [] };
+    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [] };
   }
 
   bookBal(c) { return c.ledger.reduce((a, e) => a + (e.kind === 'charge' ? e.amount : -e.amount), 0); }
@@ -183,14 +211,20 @@ class PosStore {
     const now = new Date(); const h = Math.min(Math.max(now.getHours(), 12), 23);
     this.mut((db) => {
       if (method === 'card' && tip > 0) db.cardTips = Math.round(((db.cardTips || 0) + tip) * 100) / 100;
-      t.items.forEach((i) => { if (i.covered) return; db.sales.push({ d: db.dayNumber, h, p: i.prodId, c: t.custId, q: i.qty, pr: i.price, pay: i.comp ? 'comp' : method }); });
+      // Deducting here (not per-line-item-added) ties inventory 1:1 to the
+      // same events that create sales rows -- a round's covered ($0) line is
+      // skipped below just like it's skipped for sales, since the buyer's
+      // charge line represents the same physical pour; deducting both would
+      // double-count one drink actually poured once.
+      const deduct = (prodId, qty) => { const p = db.products.find((pp) => pp.id === prodId); if (p) p.qty = Math.round((p.qty - (p.unitsPerSale || 1) * qty) * 100) / 100; };
+      t.items.forEach((i) => { if (i.covered) return; db.sales.push({ d: db.dayNumber, h, p: i.prodId, c: t.custId, q: i.qty, pr: i.price, pay: i.comp ? 'comp' : method }); deduct(i.prodId, i.qty); });
       const last = this.lastDrinkOf(t);
       let roundCharge = 0;
       db.tabs.forEach((ot) => {
         if (ot.id === t.id) return;
         (ot.credits || []).forEach((cr) => {
           if (cr.fromTabId !== t.id) return;
-          if (last) { db.sales.push({ d: db.dayNumber, h, p: last.prodId, c: t.custId, q: 1, pr: last.price, pay: method }); roundCharge += last.price; }
+          if (last) { db.sales.push({ d: db.dayNumber, h, p: last.prodId, c: t.custId, q: 1, pr: last.price, pay: method }); deduct(last.prodId, 1); roundCharge += last.price; }
           cr.fromTabId = null; cr.prepaid = true;
         });
       });
@@ -328,10 +362,16 @@ class PosStore {
   // charts for old data may drift slightly, but "last 30 days" reporting (what
   // actually matters day-to-day) anchors correctly off the most recent day.
   restoreFromPull(data) {
-    const products = (data.products || []).map((r, i) => ({
-      id: 'p' + i, name: String(r.Name || ''), cat: String(r.Category || ''),
-      price: Number(r.Price) || 0, active: String(r.Active).toLowerCase() !== 'no',
-    }));
+    const products = (data.products || []).map((r, i) => {
+      const cat = String(r.Category || '');
+      return {
+        id: 'p' + i, name: String(r.Name || ''), cat,
+        price: Number(r.Price) || 0, active: String(r.Active).toLowerCase() !== 'no',
+        qty: Number(r.Qty) || 0,
+        unitsPerSale: Number(r.UnitsPerSale) > 0 ? Number(r.UnitsPerSale) : 1,
+        restockUnit: Number(r.RestockUnit) > 0 ? Number(r.RestockUnit) : restockUnitFor(cat),
+      };
+    });
     const prodByName = new Map(products.map((p) => [p.name, p]));
 
     const dayDate = {};
@@ -341,6 +381,10 @@ class PosStore {
     const N = oldDays.length;
     const mostRecentMs = N ? dayDate[oldDays[N - 1]] : Date.now();
     const epoch = mostRecentMs + (61 - N) * DAY;
+    // (newDay, ms) pairs sorted by time, for mapping a shopping list's real
+    // date back to an approximate reconstructed day number below.
+    const dayTimeline = oldDays.map((oldD) => ({ day: dayMap[oldD], ms: dayDate[oldD] })).sort((a, b) => a.ms - b.ms);
+    const dayForTime = (ms) => { let best = 0; for (const e of dayTimeline) { if (e.ms <= ms) best = e.day; } return best; };
 
     const custByName = new Map();
     const getCust = (name) => {
@@ -359,10 +403,23 @@ class PosStore {
     (data.sales || []).forEach((r) => {
       const newDay = dayMap[r.Day]; if (!newDay) return; // no matching close-out row for this day; skip
       let prod = prodByName.get(r.Product);
-      if (!prod) { prod = { id: 'p' + products.length, name: String(r.Product || ''), cat: String(r.Category || ''), price: Number(r.Price) || 0, active: false }; products.push(prod); prodByName.set(prod.name, prod); }
+      if (!prod) { const cat = String(r.Category || ''); prod = { id: 'p' + products.length, name: String(r.Product || ''), cat, price: Number(r.Price) || 0, active: false, qty: 0, unitsPerSale: 1, restockUnit: restockUnitFor(cat) }; products.push(prod); prodByName.set(prod.name, prod); }
       const cust = getCust(r.Customer);
       sales.push({ d: newDay, h: Number(r.Hour) || 12, p: prod.id, c: cust ? cust.id : null, q: Number(r.Qty) || 1, pr: Number(r.Price) || 0, pay: String(r.Payment || 'cash') });
     });
+
+    // Shopping history is grouped by its saved date -- only the most recent
+    // list's day number actually matters going forward (it's what the "since
+    // last shopping" window anchors to), found via the nearest close-out
+    // day at or before that date.
+    const shopByDate = new Map();
+    (data.shopping || []).forEach((r) => {
+      const ms = Date.parse(r['List date']); if (isNaN(ms)) return;
+      const key = String(ms);
+      if (!shopByDate.has(key)) shopByDate.set(key, { ms, items: [] });
+      shopByDate.get(key).items.push({ name: String(r.Product || ''), cat: String(r.Category || ''), units: Number(r['Units ordered']) || 0, restockUnit: Number(r['Restock unit size']) || 1, unitsAdded: Number(r['Drinks added']) || 0 });
+    });
+    const shoppingLists = Array.from(shopByDate.values()).sort((a, b) => a.ms - b.ms).map((g, i) => ({ id: 'sl' + i, createdAt: g.ms, confirmedAt: g.ms, confirmedDay: dayForTime(g.ms), items: g.items }));
 
     const customers = Array.from(custByName.values());
     this.mut((db) => {
@@ -377,6 +434,7 @@ class PosStore {
       db.cardTips = 0;
       db.guestSeq = 1;
       db.days = [];
+      db.shoppingLists = shoppingLists;
       db.seq = 1000;
     });
     Object.assign(this.state, { view: 'tabs', activeTabId: null, dlg: null, bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 } });
@@ -635,6 +693,28 @@ function renderVals() {
     itemsList: itemsListFor(ct.items) + (ct.roundNote ? ', ' + ct.roundNote : ''), total: fmt(ct.total), when: 'closed ' + store.fmtTime(ct.closedAt),
   })));
   const openTabsOverview = () => set({ dlg: { kind: 'tabsOverview' } });
+  // Suggests restocking to roughly a 14-day supply at each product's actual
+  // sale pace since the last confirmed shopping list (or all-time if there
+  // isn't one yet). A fast-mover that ran out gets a big suggestion because
+  // its daily rate is high; a slow-mover already holding plenty gets zero
+  // because its target (rate × 14) sits below what's already on hand -- that's
+  // what covers both "restock the thing that sold out" and "stop over-ordering
+  // the thing that isn't moving" without hand-tuning per product.
+  const SHOPPING_TARGET_DAYS = 14;
+  const openShoppingList = () => {
+    const lastList = db.shoppingLists.length ? db.shoppingLists[db.shoppingLists.length - 1] : null;
+    const sinceDay = lastList ? lastList.confirmedDay : 0;
+    const daysSince = Math.max(DN - sinceDay, 1);
+    const items = db.products.filter((p) => p.active).map((p) => {
+      const soldUnits = db.sales.filter((x) => x.p === p.id && x.d > sinceDay).reduce((a, x) => a + x.q * (p.unitsPerSale || 1), 0);
+      const dailyRate = soldUnits / daysSince;
+      const shortfall = dailyRate * SHOPPING_TARGET_DAYS - p.qty;
+      const suggested = shortfall > 0 ? Math.ceil(shortfall / p.restockUnit) : 0;
+      return { prodId: p.id, name: p.name, cat: p.cat, restockUnit: p.restockUnit, currentQty: p.qty, dailyRate: Math.round(dailyRate * 10) / 10, units: suggested };
+    });
+    set({ dlg: { kind: 'shoppingList', items } });
+  };
+  const openShoppingHistory = () => set({ dlg: { kind: 'shoppingHistory' } });
 
   const dlg = S.dlg || {};
   const dlgOpen = !!S.dlg;
@@ -644,6 +724,7 @@ function renderVals() {
     dlgClose: dlg.kind === 'close', dlgTransfer: dlg.kind === 'transfer', dlgRound: dlg.kind === 'round',
     dlgLedger: dlg.kind === 'ledger', dlgBookAct: dlg.kind === 'bookAct', dlgEditProduct: dlg.kind === 'editProduct', dlgDayClosed: dlg.kind === 'dayClosed',
     dlgTabsOverview: dlg.kind === 'tabsOverview',
+    dlgShoppingList: dlg.kind === 'shoppingList', dlgShoppingHistory: dlg.kind === 'shoppingHistory',
   };
   if (dlg.kind === 'close' && activeTab) {
     const c = activeTab.custId ? store.cust(activeTab.custId) : null;
@@ -770,16 +851,55 @@ function renderVals() {
       epName: ep.name || '', onEpName: (e) => set({ ep: Object.assign({}, ep, { name: e.target.value }) }),
       epPrice: ep.price, onEpPrice: (e) => set({ ep: Object.assign({}, ep, { price: e.target.value }) }),
       epCats: ['Beer', 'Liquor', 'Wine', 'Soda', 'Food'].map((cn) => ({ label: cn, on: ep.cat === cn, pick: () => set({ ep: Object.assign({}, ep, { cat: cn }) }) })),
+      epQty: ep.qty, onEpQty: (e) => set({ ep: Object.assign({}, ep, { qty: e.target.value }) }),
+      epUnitsPerSale: ep.unitsPerSale, onEpUnitsPerSale: (e) => set({ ep: Object.assign({}, ep, { unitsPerSale: e.target.value }) }),
+      epRestockUnit: ep.restockUnit, onEpRestockUnit: (e) => set({ ep: Object.assign({}, ep, { restockUnit: e.target.value }) }),
       epSaveDisabled: !(ep.name || '').trim() || !(Number(ep.price) > 0),
       epSave: () => {
         const nm = ep.name.trim(), pr = Math.round(Number(ep.price) * 100) / 100;
+        const qty = Number(ep.qty) || 0;
+        const unitsPerSale = Number(ep.unitsPerSale) > 0 ? Number(ep.unitsPerSale) : 1;
+        const restockUnit = Number(ep.restockUnit) > 0 ? Number(ep.restockUnit) : restockUnitFor(ep.cat);
         store.mut((d) => {
-          if (ep.id) { const p = d.products.find((x) => x.id === ep.id); p.name = nm; p.price = pr; p.cat = ep.cat; }
-          else d.products.push({ id: store.uid(), name: nm, price: pr, cat: ep.cat, active: true });
+          if (ep.id) { const p = d.products.find((x) => x.id === ep.id); p.name = nm; p.price = pr; p.cat = ep.cat; p.qty = qty; p.unitsPerSale = unitsPerSale; p.restockUnit = restockUnit; }
+          else d.products.push({ id: store.uid(), name: nm, price: pr, cat: ep.cat, active: true, qty, unitsPerSale, restockUnit });
         });
         syncProducts();
         set({ dlg: null, ep: null });
       },
+    });
+  }
+  if (dlg.kind === 'shoppingList') {
+    const items = dlg.items || [];
+    const setItems = (next) => set({ dlg: Object.assign({}, dlg, { items: next }) });
+    const unitLabel = (cat) => (cat === 'Beer' || cat === 'Soda' ? 'case' : cat === 'Liquor' || cat === 'Wine' ? 'bottle' : 'unit');
+    Object.assign(dlgVals, {
+      shoppingRows: items.map((it, idx) => ({
+        name: it.name, cat: it.cat, currentQty: it.currentQty, dailyRate: it.dailyRate,
+        unitLabel: unitLabel(it.cat), units: it.units, adds: Math.round(it.units * it.restockUnit * 100) / 100,
+        inc: () => { const next = items.slice(); next[idx] = Object.assign({}, it, { units: it.units + 1 }); setItems(next); },
+        dec: () => { const next = items.slice(); next[idx] = Object.assign({}, it, { units: Math.max(0, it.units - 1) }); setItems(next); },
+      })),
+      shoppingOrderedCount: items.filter((it) => it.units > 0).length,
+      confirmShoppingList: () => {
+        const finalItems = items.filter((it) => it.units > 0).map((it) => ({ prodId: it.prodId, name: it.name, cat: it.cat, units: it.units, restockUnit: it.restockUnit, unitsAdded: Math.round(it.units * it.restockUnit * 100) / 100 }));
+        let list;
+        store.mut((d) => {
+          finalItems.forEach((fi) => { const p = d.products.find((pp) => pp.id === fi.prodId); if (p) p.qty = Math.round((p.qty + fi.unitsAdded) * 100) / 100; });
+          list = { id: store.uid(), createdAt: Date.now(), confirmedAt: Date.now(), confirmedDay: db.dayNumber, items: finalItems };
+          d.shoppingLists.push(list);
+        });
+        enqueueShoppingListSync(list);
+        set({ dlg: null });
+      },
+    });
+  }
+  if (dlg.kind === 'shoppingHistory') {
+    Object.assign(dlgVals, {
+      shoppingHistoryRows: db.shoppingLists.slice().reverse().map((list) => ({
+        date: new Date(list.confirmedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        itemsList: list.items.map((it) => it.units + ' × ' + it.name + ' (+' + it.unitsAdded + ')').join(', ') || '—',
+      })),
     });
   }
   if (dlg.kind === 'dayClosed') {
@@ -799,12 +919,14 @@ function renderVals() {
     });
   }
 
-  const syncProducts = () => enqueueProductsSync(db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
+  const syncProducts = () => enqueueProductsSync(db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active, qty: p.qty, unitsPerSale: p.unitsPerSale, restockUnit: p.restockUnit })));
   const prodRows = db.products.map((p) => ({
     name: p.name, cat: p.cat, price: fmt(p.price), dim: p.active ? '1' : '0.4',
     activeLabel: p.active ? 'Active' : 'Retired',
+    qty: p.qty, qtyLow: p.qty <= 0,
+    onQty: (e) => { const v = Number(e.target.value); store.mut((d) => { const x = d.products.find((q) => q.id === p.id); x.qty = isNaN(v) ? 0 : Math.round(v * 100) / 100; }); },
     toggle: () => { store.mut((d) => { const x = d.products.find((q) => q.id === p.id); x.active = !x.active; }); syncProducts(); },
-    edit: () => set({ dlg: { kind: 'editProduct' }, ep: { id: p.id, origName: p.name, name: p.name, price: String(p.price), cat: p.cat } }),
+    edit: () => set({ dlg: { kind: 'editProduct' }, ep: { id: p.id, origName: p.name, name: p.name, price: String(p.price), cat: p.cat, qty: String(p.qty), unitsPerSale: String(p.unitsPerSale), restockUnit: String(p.restockUnit) } }),
     del: () => { store.mut((d) => { d.products = d.products.filter((q) => q.id !== p.id); }); syncProducts(); },
   }));
 
@@ -832,8 +954,8 @@ function renderVals() {
     hasDepNote, depositNote,
     hasOpenTabsWarn: openTabs.length > 0, openTabNames: openNames,
     closeDayDisabled: !canClose, closeDayHint, doCloseDay,
-    tabsOverviewRows, openTabsOverview,
-    prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer' } }),
+    tabsOverviewRows, openTabsOverview, openShoppingList, openShoppingHistory,
+    prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer', qty: '0', unitsPerSale: '1', restockUnit: String(restockUnitFor('Beer')) } }),
     tillVal: String(db.tillTarget), onTill: (e) => store.mut((d) => { d.tillTarget = Math.max(50, Number(e.target.value) || 200); }),
     resetDemo: () => store.resetDemo(),
   }, det, dlgVals);

@@ -28,6 +28,10 @@ function doPost(e) {
       writeProducts_(body.products);
       return json_({ ok: true });
     }
+    if (body.type === 'shoppingList') {
+      writeShoppingList_(body.list);
+      return json_({ ok: true });
+    }
     if (body.type === 'pull') {
       return json_({
         ok: true,
@@ -35,6 +39,7 @@ function doPost(e) {
         book: readSheet_('Book'),
         sales: readSheet_('Sales'),
         closeouts: readSheet_('Close-out'),
+        shopping: readSheet_('Shopping'),
       });
     }
     return json_({ ok: false, error: 'unknown type: ' + body.type });
@@ -96,9 +101,17 @@ function writeProducts_(products) {
   var sh = ss.getSheetByName('Products');
   if (sh) ss.deleteSheet(sh);
   sh = ss.insertSheet('Products');
-  sh.appendRow(['Name', 'Category', 'Price', 'Active']);
+  sh.appendRow(['Name', 'Category', 'Price', 'Active', 'Qty', 'UnitsPerSale', 'RestockUnit']);
   (products || []).forEach(function (p) {
-    sh.appendRow([p.name, p.cat, p.price, p.active ? 'Yes' : 'No']);
+    sh.appendRow([p.name, p.cat, p.price, p.active ? 'Yes' : 'No', p.qty, p.unitsPerSale, p.restockUnit]);
+  });
+}
+
+// Append-only history, one row per item ordered on a confirmed shopping list.
+function writeShoppingList_(list) {
+  var sh = sheet_('Shopping', ['List date', 'Product', 'Category', 'Units ordered', 'Restock unit size', 'Drinks added']);
+  (list.items || []).forEach(function (it) {
+    sh.appendRow([new Date(list.confirmedAt), it.name, it.cat, it.units, it.restockUnit, it.unitsAdded]);
   });
 }
 

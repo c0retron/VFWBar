@@ -363,7 +363,7 @@ const syncStatusLabel = computed(() => {
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div style="display:flex;align-items:center;gap:var(--space-2)">
           <h6 style="margin:0;color:var(--color-accent-700)">Day summary</h6>
-          <button type="button" class="btn btn-ghost" @click="vm.openTabsOverview" style="margin-left:auto;min-height:36px;font-size:12px">View all tabs</button>
+          <button type="button" class="btn" @click="vm.openTabsOverview" style="margin-left:auto;min-height:36px;font-size:12px">View all tabs</button>
         </div>
         <div class="card blueprint">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
@@ -435,18 +435,23 @@ const syncStatusLabel = computed(() => {
   <!-- Admin -->
   <div v-if="vm.viewAdmin" style="flex:1;min-height:0;display:flex;gap:var(--space-4);padding:var(--space-4)">
     <div style="flex:1.3;min-width:0;display:flex;flex-direction:column;gap:var(--space-2)">
-      <div style="display:flex;align-items:center;gap:var(--space-2)">
+      <div style="display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap">
         <h6 style="margin:0;color:var(--color-accent-700)">Products &amp; prices</h6>
-        <button type="button" class="btn" @click="vm.addProduct" style="margin-left:auto;min-height:44px">+ Add product</button>
+        <button type="button" class="btn" @click="vm.openShoppingHistory" style="margin-left:auto;min-height:44px;font-size:12px">Past shopping lists</button>
+        <button type="button" class="btn" @click="vm.openShoppingList" style="min-height:44px">Create shopping list</button>
+        <button type="button" class="btn" @click="vm.addProduct" style="min-height:44px">+ Add product</button>
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto">
         <table class="table">
-          <thead><tr><th>Product</th><th>Category</th><th style="text-align:right">Price</th><th>Status</th><th style="text-align:right"></th><th style="text-align:right"></th></tr></thead>
+          <thead><tr><th>Product</th><th>Category</th><th style="text-align:right">Price</th><th style="text-align:right">Qty on hand</th><th>Status</th><th style="text-align:right"></th><th style="text-align:right"></th></tr></thead>
           <tbody>
             <tr v-for="(p, i) in vm.prodRows" :key="i">
               <td :style="`font-size:15px;opacity:${p.dim}`">{{ p.name }}</td>
               <td><span class="tag tag-neutral">{{ p.cat }}</span></td>
               <td style="text-align:right">{{ p.price }}</td>
+              <td style="text-align:right">
+                <input class="input" type="number" step="0.5" :value="p.qty" @change="p.onQty" :style="`width:70px;min-height:36px;text-align:right;display:inline-block${p.qtyLow ? ';border-color:var(--color-accent);color:var(--color-accent-700)' : ''}`">
+              </td>
               <td><button type="button" class="btn btn-ghost" @click="p.toggle" style="min-height:40px;font-size:12px">{{ p.activeLabel }}</button></td>
               <td style="text-align:right"><button type="button" class="btn btn-ghost" @click="p.edit" style="min-height:40px">Edit</button></td>
               <td style="text-align:right"><button type="button" class="btn btn-ghost" @click="p.del" style="min-height:40px;color:var(--color-accent-700)">Delete</button></td>
@@ -613,6 +618,12 @@ const syncStatusLabel = computed(() => {
           <label v-for="(c, i) in vm.epCats" :key="i" class="seg-opt" style="flex:1;justify-content:center;min-height:44px;padding:7px 4px"><input type="radio" name="epcat" :checked="c.on" @change="c.pick">{{ c.label }}</label>
         </div>
       </div>
+      <div style="display:flex;gap:var(--space-1)">
+        <div class="field" style="flex:1"><label>Qty on hand (drinks)</label><input class="input" type="number" step="0.5" :value="vm.epQty" @change="vm.onEpQty" style="min-height:46px"></div>
+        <div class="field" style="flex:1"><label>Used per sale</label><input class="input" type="number" step="0.5" min="0.5" :value="vm.epUnitsPerSale" @change="vm.onEpUnitsPerSale" style="min-height:46px"></div>
+        <div class="field" style="flex:1"><label>Per case/bottle</label><input class="input" type="number" step="1" min="1" :value="vm.epRestockUnit" @change="vm.onEpRestockUnit" style="min-height:46px"></div>
+      </div>
+      <p class="dialog-body" style="margin:0;font-size:12px;color:var(--color-neutral-600)">"Used per sale" is how many drink-units one order of this uses — a mixed drink might use more than a straight shot. "Per case/bottle" is how many drink-units one shopping-list unit restocks (24 for a beer case, 12 for a liquor bottle).</p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Cancel</button>
         <button type="button" class="btn btn-primary blueprint" @click="vm.epSave" :disabled="vm.epSaveDisabled" style="min-height:48px">
@@ -620,6 +631,53 @@ const syncStatusLabel = computed(() => {
           Save
         </button>
       </div>
+    </div>
+
+    <div v-if="vm.dlgShoppingList" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg);width:min(720px,100%)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div class="dialog-title">Suggested shopping list</div>
+      <p class="dialog-body" style="margin:0;font-size:13px;color:var(--color-neutral-600)">Based on sales since the last confirmed list, aiming for about two weeks of stock at each item's current pace. Adjust anything before confirming — confirming adds these quantities straight to inventory.</p>
+      <div style="max-height:380px;overflow-y:auto">
+        <table class="table">
+          <thead><tr><th>Product</th><th style="text-align:right">On hand</th><th style="text-align:right">Daily rate</th><th style="text-align:center">Order</th><th style="text-align:right">Adds</th></tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in vm.shoppingRows" :key="i">
+              <td style="font-size:14px">{{ r.name }}</td>
+              <td style="text-align:right;color:var(--color-neutral-600)">{{ r.currentQty }}</td>
+              <td style="text-align:right;color:var(--color-neutral-600)">{{ r.dailyRate }}/day</td>
+              <td style="text-align:center">
+                <span style="display:inline-flex;align-items:center;gap:4px">
+                  <button type="button" class="btn btn-ghost" @click="r.dec" aria-label="fewer" style="min-width:36px;min-height:36px;font-size:16px">−</button>
+                  <span style="font-family:var(--font-heading);font-size:17px;min-width:24px;text-align:center">{{ r.units }}</span>
+                  <button type="button" class="btn btn-ghost" @click="r.inc" aria-label="more" style="min-width:36px;min-height:36px;font-size:16px">+</button>
+                  <span style="font-size:12px;color:var(--color-neutral-600)">{{ r.unitLabel }}{{ r.units === 1 ? '' : 's' }}</span>
+                </span>
+              </td>
+              <td style="text-align:right;color:var(--color-neutral-600)">{{ r.adds ? '+' + r.adds : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Cancel</button>
+        <button type="button" class="btn btn-primary blueprint" @click="vm.confirmShoppingList" :disabled="!vm.shoppingOrderedCount" style="min-height:48px">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          Confirm &amp; add to inventory ({{ vm.shoppingOrderedCount }})
+        </button>
+      </div>
+    </div>
+
+    <div v-if="vm.dlgShoppingHistory" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg);width:min(640px,100%)">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <div class="dialog-title">Past shopping lists</div>
+      <p v-if="!vm.shoppingHistoryRows.length" class="dialog-body" style="margin:0;color:var(--color-neutral-600)">No confirmed shopping lists yet.</p>
+      <div v-else style="max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-2)">
+        <div v-for="(r, i) in vm.shoppingHistoryRows" :key="i" style="border-bottom:1px solid var(--mix-text-22);padding-bottom:var(--space-2)">
+          <div style="font-family:var(--font-heading);font-size:15px">{{ r.date }}</div>
+          <div style="font-size:13px;color:var(--color-neutral-600)">{{ r.itemsList }}</div>
+        </div>
+      </div>
+      <div class="dialog-actions"><button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Close</button></div>
     </div>
 
     <div v-if="vm.dlgDayClosed" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg);width:min(460px,100%)">

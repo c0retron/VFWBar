@@ -8,6 +8,7 @@ import { reactive } from 'vue';
 const CONFIG_KEY = 'vfw_pos_sync_config';
 const QUEUE_KEY = 'vfw_pos_sync_queue';
 const PRODUCTS_KEY = 'vfw_pos_sync_products_pending';
+const SHOPPING_QUEUE_KEY = 'vfw_pos_sync_shopping_queue';
 
 function loadConfig() {
   try { return JSON.parse(localStorage.getItem(CONFIG_KEY)) || { url: '', secret: '' }; }
@@ -23,6 +24,13 @@ function loadQueue() {
 function saveQueue(q) {
   try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch (e) { /* ignore */ }
 }
+function loadShoppingQueue() {
+  try { return JSON.parse(localStorage.getItem(SHOPPING_QUEUE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveShoppingQueue(q) {
+  try { localStorage.setItem(SHOPPING_QUEUE_KEY, JSON.stringify(q)); } catch (e) { /* ignore */ }
+}
 
 export const syncState = reactive({
   configured: false,
@@ -35,7 +43,7 @@ export const syncState = reactive({
 function refreshState() {
   const cfg = loadConfig();
   syncState.configured = !!cfg.url;
-  syncState.pendingCount = loadQueue().length + (localStorage.getItem(PRODUCTS_KEY) ? 1 : 0);
+  syncState.pendingCount = loadQueue().length + loadShoppingQueue().length + (localStorage.getItem(PRODUCTS_KEY) ? 1 : 0);
 }
 
 export function getConfig() { return loadConfig(); }
@@ -59,6 +67,14 @@ export function enqueueDaySync(summary) {
 // happen before the next successful sync.
 export function enqueueProductsSync(products) {
   try { localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products)); } catch (e) { /* ignore */ }
+  processQueue();
+}
+
+export function enqueueShoppingListSync(list) {
+  const q = loadShoppingQueue();
+  if (!q.some((x) => x.id === list.id)) q.push({ id: list.id, list });
+  saveShoppingQueue(q);
+  refreshState();
   processQueue();
 }
 
@@ -108,8 +124,9 @@ async function processQueue() {
   const cfg = loadConfig();
   if (!cfg.url) { refreshState(); return; }
   let q = loadQueue();
+  let sq = loadShoppingQueue();
   const pendingProducts = localStorage.getItem(PRODUCTS_KEY);
-  if (!q.length && !pendingProducts) { refreshState(); return; }
+  if (!q.length && !sq.length && !pendingProducts) { refreshState(); return; }
 
   inFlight = true;
   syncState.status = 'syncing';
@@ -121,6 +138,12 @@ async function processQueue() {
       saveQueue(q);
       syncState.lastSyncAt = Date.now();
       syncState.pendingCount = q.length;
+    }
+    for (const item of [...sq]) {
+      await postShoppingList(cfg, item.list);
+      sq = sq.filter((x) => x.id !== item.id);
+      saveShoppingQueue(sq);
+      syncState.lastSyncAt = Date.now();
     }
     if (pendingProducts) {
       await postProducts(cfg, JSON.parse(pendingProducts));
@@ -163,6 +186,7 @@ async function postJson_(cfg, payload) {
 
 async function postDay(cfg, summary) { return postJson_(cfg, { secret: cfg.secret, type: 'day', summary }); }
 async function postProducts(cfg, products) { return postJson_(cfg, { secret: cfg.secret, type: 'products', products }); }
+async function postShoppingList(cfg, list) { return postJson_(cfg, { secret: cfg.secret, type: 'shoppingList', list }); }
 
 refreshState();
 if (syncState.configured) processQueue(); // flush anything queued from a prior offline session
