@@ -237,6 +237,10 @@ class PosStore {
     this.state.bills = { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 };
     this.state.dlg = { kind: 'dayClosed', summary };
     enqueueDaySync(summary);
+    // Products only sync when something changes in Admin -- if nothing's
+    // been touched since the sheet was set up, that tab never gets created.
+    // Piggyback on the daily close so it backs up at least once a day either way.
+    enqueueProductsSync(this.db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
   }
 
   depositPlan(counts, target) {
@@ -417,6 +421,11 @@ function renderVals() {
     store.mut((d) => d.customers.push({ id: newId, name: raw, ledger: [] }));
     store.startTab(newId, raw);
   };
+  // As-you-type name lookup against everyone ever tracked (not just current
+  // regulars) -- keeps names consistent instead of accumulating near-duplicate
+  // spellings of the same person, and skips typing for anyone found.
+  const nameQuery = S.startName.trim().toLowerCase();
+  const nameSuggestions = nameQuery ? db.customers.filter((c) => c.name.toLowerCase().includes(nameQuery)).slice(0, 6).map((c) => ({ name: c.name, pick: () => { set({ startName: '' }); store.startTab(c.id, c.name); } })) : [];
 
   let det = {};
   if (activeTab) {
@@ -777,6 +786,7 @@ function renderVals() {
     startName: S.startName, onStartName: (e) => set({ startName: e.target.value }),
     onStartKey: (e) => { if (e.key === 'Enter') startNamed(); },
     startNamed, guestLabel: 'Walk-in — Guest ' + db.guestSeq,
+    nameSuggestions, hasNameSuggestions: nameSuggestions.length > 0,
     startGuest: () => { const n = 'Guest ' + db.guestSeq; store.mut((d) => d.guestSeq++); store.startTab(null, n); },
     catOpts, prodBtns, prodBtnH: '64px',
     bookRows, bookOwedTotal: fmt(owed), bookOwedSub: owedN + ' members owe', bookCreditTotal: fmt(cred), bookCreditSub: credN + ' members in credit',

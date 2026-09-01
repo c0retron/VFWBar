@@ -7,7 +7,7 @@
 import { ref, computed } from 'vue';
 import { vm, store } from './store.js';
 import { isDark, toggleDark } from './theme.js';
-import { syncState, getConfig, setConfig, retrySync, pullAll, enqueueAllDays } from './sync.js';
+import { syncState, getConfig, setConfig, retrySync, pullAll, enqueueAllDays, enqueueProductsSync } from './sync.js';
 import { weather } from './weather.js';
 
 function iconSvg(cat) {
@@ -22,6 +22,14 @@ const initialCfg = getConfig();
 const sheetsUrl = ref(initialCfg.url);
 const sheetsSecret = ref(initialCfg.secret);
 function saveSheetsConfig() { setConfig(sheetsUrl.value, sheetsSecret.value); }
+
+// "Sync now" always force-includes the current product list, not just
+// whatever's already queued -- otherwise the Products tab never appears
+// until a product happens to be edited after sync gets set up.
+function syncNow() {
+  enqueueProductsSync(store.db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
+  retrySync();
+}
 
 const restoring = ref(false);
 const restoreStatus = ref('');
@@ -103,7 +111,7 @@ const syncStatusLabel = computed(() => {
             <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:6px;min-height:26px;font-size:14px">
               <span style="flex:1;min-width:0">{{ d.name }}</span>
               <span style="color:var(--color-neutral-600)">× {{ d.qty }}</span>
-              <button type="button" class="btn btn-ghost" @click.stop="d.add" aria-label="add one more" style="min-width:34px;min-height:26px;padding:0 6px;font-size:12px">+1</button>
+              <button type="button" class="btn" @click.stop="d.add" aria-label="add one more" style="min-width:34px;min-height:26px;padding:0 6px;font-size:12px;color:var(--color-accent-700)">+1</button>
             </div>
           </div>
           <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
@@ -119,8 +127,11 @@ const syncStatusLabel = computed(() => {
     <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin: 0; color: var(--color-accent-700); font-size: 16px">Start a tab</h6>
       <div style="display:flex;gap:var(--space-1)">
-        <input class="input" placeholder="Name…" :value="vm.startName" @change="vm.onStartName" @keydown="vm.onStartKey" style="min-height:44px">
+        <input class="input" placeholder="Name…" :value="vm.startName" @input="vm.onStartName" @keydown="vm.onStartKey" style="min-height:44px">
         <button type="button" class="btn" @click="vm.startNamed" style="min-height:44px">Start</button>
+      </div>
+      <div v-if="vm.hasNameSuggestions" style="display:flex;flex-direction:column;gap:1px;border:1.5px solid var(--color-divider);padding:2px">
+        <button v-for="(s, i) in vm.nameSuggestions" :key="i" type="button" class="btn btn-ghost" @click="s.pick" style="justify-content:flex-start;min-height:38px;font-size:14px">{{ s.name }}</button>
       </div>
       <button type="button" class="btn" @click="vm.startGuest" style="min-height:44px;justify-content:flex-start">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
@@ -455,7 +466,7 @@ const syncStatusLabel = computed(() => {
         <div class="field"><label>Shared secret</label><input class="input" type="password" v-model="sheetsSecret" style="min-height:44px"></div>
         <div style="display:flex;gap:var(--space-1)">
           <button type="button" class="btn" @click="saveSheetsConfig" style="min-height:44px">Save</button>
-          <button type="button" class="btn btn-ghost" @click="retrySync" :disabled="!syncState.configured" style="min-height:44px">Sync now</button>
+          <button type="button" class="btn btn-ghost" @click="syncNow" :disabled="!syncState.configured" style="min-height:44px">Sync now</button>
         </div>
         <div style="font-size:12px;color:var(--color-neutral-600)">{{ syncStatusLabel }}</div>
         <div class="hr" style="margin:var(--space-1) 0"></div>
