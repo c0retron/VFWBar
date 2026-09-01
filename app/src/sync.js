@@ -74,10 +74,29 @@ export async function pullAll() {
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ secret: cfg.secret, type: 'pull' }),
   });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'pull failed');
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) {
+    throw new Error('Got a non-JSON response (HTTP ' + res.status + ') — check the Web App URL and deployment access. Response started with: ' + text.slice(0, 100));
+  }
+  if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
   return data;
+}
+
+// Recovery path: re-queues every day this tablet has ever closed, regardless
+// of whether it was already (supposedly) synced. Meant for clawing back from
+// the silent-failure bug above -- if a day was dequeued without actually
+// reaching the sheet, this is the only way to get it there short of manually
+// re-entering it. Safe to run as long as nothing in the range genuinely made
+// it to the sheet already; if some days did land before, re-sending them
+// will duplicate those rows in Sales/Book/Close-out.
+export function enqueueAllDays(days) {
+  const q = loadQueue();
+  (days || []).forEach((summary) => { if (!q.some((x) => x.id === summary.d)) q.push({ id: summary.d, summary }); });
+  saveQueue(q);
+  refreshState();
+  processQueue();
 }
 
 export function retrySync() { processQueue(); }
@@ -118,42 +137,32 @@ async function processQueue() {
   }
 }
 
-async function postDay(cfg, summary) {
+// Deliberately strict: an earlier version treated an unparseable response as
+// "probably sent, Apps Script is just being weird about CORS" and swallowed
+// it as success. In practice that meant a misconfigured deployment (wrong
+// URL, wrong access setting, an expired version) failed *silently* -- the
+// item got marked sent and dequeued locally while never actually reaching
+// the sheet, with no error surfaced anywhere. Never assume success on a
+// response we can't actually read.
+async function postJson_(cfg, payload) {
   const res = await fetch(cfg.url, {
     method: 'POST',
     // text/plain avoids a CORS preflight (Apps Script Web Apps handle preflight
     // OPTIONS requests poorly) — the body is still JSON, Apps Script parses it itself.
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: cfg.secret, type: 'day', summary }),
+    body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  // Some Apps Script deployments return an opaque/unreadable response even on
-  // success. If we can read it, use it to catch app-level rejections (bad
-  // secret, etc); if we can't, a non-throwing fetch is the best signal we get.
-  try {
-    const data = await res.json();
-    if (data && data.ok === false) throw new Error(data.error || 'sync rejected');
-  } catch (parseErr) {
-    if (parseErr instanceof SyntaxError) return; // unreadable body, treat as sent
-    throw parseErr;
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) {
+    throw new Error('Got a non-JSON response (HTTP ' + res.status + ') — check the Web App URL is correct and deployed with "Execute as: Me" / "Who has access: Anyone". Response started with: ' + text.slice(0, 100));
   }
+  if (!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
 }
 
-async function postProducts(cfg, products) {
-  const res = await fetch(cfg.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ secret: cfg.secret, type: 'products', products }),
-  });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  try {
-    const data = await res.json();
-    if (data && data.ok === false) throw new Error(data.error || 'sync rejected');
-  } catch (parseErr) {
-    if (parseErr instanceof SyntaxError) return;
-    throw parseErr;
-  }
-}
+async function postDay(cfg, summary) { return postJson_(cfg, { secret: cfg.secret, type: 'day', summary }); }
+async function postProducts(cfg, products) { return postJson_(cfg, { secret: cfg.secret, type: 'products', products }); }
 
 refreshState();
 if (syncState.configured) processQueue(); // flush anything queued from a prior offline session

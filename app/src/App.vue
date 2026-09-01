@@ -7,7 +7,16 @@
 import { ref, computed } from 'vue';
 import { vm, store } from './store.js';
 import { isDark, toggleDark } from './theme.js';
-import { syncState, getConfig, setConfig, retrySync, pullAll } from './sync.js';
+import { syncState, getConfig, setConfig, retrySync, pullAll, enqueueAllDays } from './sync.js';
+import { weather } from './weather.js';
+
+function iconSvg(cat) {
+  const a = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
+  if (cat === 'sun') return '<svg ' + a + '><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>';
+  if (cat === 'cloud') return '<svg ' + a + '><path d="M17.5 19H9a5 5 0 1 1 1.55-9.76A6 6 0 0 1 22 12.5a4.5 4.5 0 0 1-4.5 4.5Z"></path></svg>';
+  if (cat === 'snow') return '<svg ' + a + '><path d="M17.5 12H9a5 5 0 1 1 1.55-6.76A6 6 0 0 1 22 8.5"></path><path d="M8 15h.01M8 19h.01M12 17h.01M12 21h.01M16 15h.01M16 19h.01"></path></svg>';
+  return '<svg ' + a + '><path d="M17.5 12H9a5 5 0 1 1 1.55-6.76A6 6 0 0 1 22 8.5"></path><path d="M16 14v6M8 14v6M12 16v6"></path></svg>'; // rain
+}
 
 const initialCfg = getConfig();
 const sheetsUrl = ref(initialCfg.url);
@@ -31,6 +40,16 @@ async function doRestore() {
   }
 }
 
+// Recovery for the silent-failure sync bug (fixed, but days closed before the
+// fix may have been marked "sent" locally without ever reaching the sheet).
+// Re-queues every day this tablet has ever closed. Only run this once things
+// are confirmed working -- if any days genuinely made it through before,
+// this duplicates those rows.
+function resendAllDays() {
+  if (!confirm('Re-send every closed day to the sheet? Only do this if you\'re not sure earlier days actually made it there — if some already did, this will duplicate those rows.')) return;
+  enqueueAllDays(store.db.days);
+}
+
 const syncStatusLabel = computed(() => {
   if (!syncState.configured) return 'Not set up yet — paste in the Web App URL above and save.';
   if (syncState.status === 'syncing') return 'Syncing…';
@@ -44,14 +63,26 @@ const syncStatusLabel = computed(() => {
 <template>
 <div style="height:100vh;display:flex;flex-direction:column;overflow:hidden;font-variant-numeric:tabular-nums">
   <nav class="nav" style="border-bottom:1.5px solid var(--color-divider);flex:none">
-    <span class="nav-brand">VFW CANTEEN</span>
-    <a v-for="(n, i) in vm.navItems" :key="i" href="#" :aria-current="n.cur" @click="n.go" style="padding:10px 2px;font-size:15px">{{ n.label }}</a>
-    <span class="tag tag-accent" style="margin-left:var(--space-2)">{{ vm.openCountLabel }}</span>
-    <span style="font-size:12px;letter-spacing:0.08em;color:var(--color-neutral-600)">{{ vm.dayLabel }}</span>
-    <button type="button" class="btn btn-ghost" @click="toggleDark" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" style="min-width:36px;min-height:36px;padding:0">
-      <svg v-if="!isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
-      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>
-    </button>
+    <span class="nav-brand" style="margin-right:var(--space-4)">VFW CANTEEN</span>
+    <div v-if="weather.ready" style="display:flex;align-items:center;gap:var(--space-2);font-size:12px;color:var(--color-neutral-600)">
+      <span v-html="iconSvg(weather.current.cat)" style="display:inline-flex;color:var(--color-accent-700)"></span>
+      <span style="font-family:var(--font-heading);font-size:18px;color:var(--color-text)">{{ weather.current.temp }}°</span>
+      <span style="width:1px;height:16px;background:var(--color-divider)"></span>
+      <span v-for="(d, i) in weather.days" :key="i" style="display:flex;align-items:center;gap:3px">
+        <span>{{ d.label }}</span>
+        <span v-html="iconSvg(d.cat)" style="display:inline-flex"></span>
+        <span>{{ d.hi }}°/{{ d.lo }}°</span>
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:var(--space-3);margin-left:auto">
+      <a v-for="(n, i) in vm.navItems" :key="i" href="#" :aria-current="n.cur" @click="n.go" style="padding:10px 2px;font-size:15px">{{ n.label }}</a>
+      <span class="tag tag-accent">{{ vm.openCountLabel }}</span>
+      <span style="font-size:12px;letter-spacing:0.08em;color:var(--color-neutral-600)">{{ vm.dayLabel }}</span>
+      <button type="button" class="btn btn-ghost" @click="toggleDark" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" style="min-width:36px;min-height:36px;padding:0">
+        <svg v-if="!isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg>
+        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path></svg>
+      </button>
+    </div>
   </nav>
 
   <!-- Tabs list -->
@@ -68,10 +99,12 @@ const syncStatusLabel = computed(() => {
             <div class="card-title" style="font-size:22px">{{ t.name }} <span style="color:#a3781f;font-size:17px;letter-spacing:2px">{{ t.stars }}</span></div>
             <span v-if="t.hasBook" class="tag tag-outline">book {{ t.bookBal }}</span>
           </div>
-          <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column">
-            <button v-for="(d, di) in t.drinkLines" :key="di" type="button" class="btn btn-ghost" @click.stop="d.add" style="justify-content:space-between;min-height:30px;padding:2px 4px;font-size:14px;font-weight:400;font-family:var(--font-body)">
-              <span>{{ d.name }}</span><span style="color:var(--color-neutral-600)">× {{ d.qty }}</span>
-            </button>
+          <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column;gap:1px">
+            <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:6px;min-height:26px;font-size:14px">
+              <span style="flex:1;min-width:0">{{ d.name }}</span>
+              <span style="color:var(--color-neutral-600)">× {{ d.qty }}</span>
+              <button type="button" class="btn btn-ghost" @click.stop="d.add" aria-label="add one more" style="min-width:34px;min-height:26px;padding:0 6px;font-size:12px">+1</button>
+            </div>
           </div>
           <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
           <div class="card-meta"><span>{{ t.meta }}</span></div>
@@ -428,6 +461,7 @@ const syncStatusLabel = computed(() => {
         <div class="hr" style="margin:var(--space-1) 0"></div>
         <button type="button" class="btn btn-ghost" @click="doRestore" :disabled="!syncState.configured || restoring" style="min-height:44px">Restore from Google Sheet…</button>
         <div v-if="restoreStatus" style="font-size:12px;color:var(--color-neutral-600)">{{ restoreStatus }}</div>
+        <button type="button" class="btn btn-ghost" @click="resendAllDays" :disabled="!syncState.configured" style="min-height:44px;font-size:12px">Re-send all closed days…</button>
       </div>
       <button type="button" class="btn btn-ghost" @click="vm.resetDemo" style="min-height:44px;color:var(--color-accent-700)">Reset demo data</button>
     </div>
