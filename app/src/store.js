@@ -233,9 +233,48 @@ class PosStore {
   }
 
   depositPlan(counts, target) {
-    const den = [1, 5, 10, 20, 50, 100]; let rem = target; const keep = {};
-    den.forEach((dn) => { const k = Math.min(counts[dn] || 0, Math.floor(rem / dn)); keep[dn] = k; rem -= k * dn; });
-    if (rem > 0) { for (const dn of den) { if ((counts[dn] || 0) > (keep[dn] || 0) && dn > rem && dn - rem < rem) { keep[dn]++; rem -= dn; break; } } }
+    // Bounded subset-sum: find the till total actually achievable from the bills
+    // counted that's closest to `target` (exact, if some combination hits it
+    // exactly), rather than a greedy fill that can land far off target even when
+    // an exact split exists. reach[i] = sums achievable using only den[0..i-1].
+    const den = [1, 5, 10, 20, 50, 100];
+    const total = den.reduce((a, d) => a + d * (counts[d] || 0), 0);
+    const reach = [new Array(total + 1).fill(false)];
+    reach[0][0] = true;
+    den.forEach((dn, i) => {
+      const cnt = counts[dn] || 0;
+      const prev = reach[i];
+      const cur = prev.slice();
+      for (let s = 0; s <= total; s++) {
+        if (!prev[s]) continue;
+        for (let k = 1; k <= cnt && s + k * dn <= total; k++) cur[s + k * dn] = true;
+      }
+      reach.push(cur);
+    });
+    const finalReach = reach[den.length];
+    let bestSum = 0, bestDiff = Infinity;
+    for (let s = 0; s <= total; s++) {
+      if (!finalReach[s]) continue;
+      const diff = Math.abs(s - target);
+      if (diff < bestDiff) { bestDiff = diff; bestSum = s; }
+    }
+    // Backtrack largest denomination first, always taking the smallest count of
+    // it that still leaves the remainder achievable with what's left -- biases
+    // toward depositing big bills and keeping small ones for making change,
+    // when more than one combination hits the same total.
+    const keep = {};
+    let s = bestSum;
+    for (let i = den.length - 1; i >= 0; i--) {
+      const dn = den[i]; const cnt = counts[dn] || 0;
+      const before = reach[i];
+      let chosen = 0;
+      for (let k = 0; k <= cnt; k++) {
+        const rem = s - k * dn;
+        if (rem >= 0 && before[rem]) { chosen = k; break; }
+      }
+      keep[dn] = chosen;
+      s -= chosen * dn;
+    }
     return { keep };
   }
   sumBills(c) { return [1, 5, 10, 20, 50, 100].reduce((a, d) => a + d * (c[d] || 0), 0); }
@@ -269,7 +308,21 @@ function renderVals() {
 
   const tabCards = openTabs.map((t) => {
     const c = t.custId ? store.cust(t.custId) : null; const bal = c ? store.bookBal(c) : 0;
-    return { name: t.name, stars: '★'.repeat(Math.min((t.credits || []).length, 6)), total: fmt(store.tabTotal(t)), meta: t.items.reduce((a, i) => a + i.qty, 0) + ' items · opened ' + store.fmtTime(t.openedAt), hasBook: !!c && Math.abs(bal) >= 0.01, bookBal: fmt(bal), open: () => set({ activeTabId: t.id, cat: 'All' }) };
+    // Grouped by product for a quick-glance summary; tapping a line adds one
+    // more via the normal addItem() path (same star-credit/merge logic as the
+    // tab-detail "add to tab" grid), so bartenders can re-round without
+    // opening the tab at all. Deliberately collapses star/comp distinctions
+    // that stay visible in the tab detail -- this is a summary, not the ledger.
+    const grouped = {};
+    t.items.forEach((i) => {
+      if (!grouped[i.prodId]) grouped[i.prodId] = { prodId: i.prodId, name: i.name, qty: 0 };
+      grouped[i.prodId].qty += i.qty;
+    });
+    const drinkLines = Object.values(grouped).map((g) => {
+      const prod = db.products.find((p) => p.id === g.prodId);
+      return { name: g.name, qty: g.qty, add: () => { if (prod) store.addItem(t.id, prod); } };
+    });
+    return { name: t.name, stars: '★'.repeat(Math.min((t.credits || []).length, 6)), total: fmt(store.tabTotal(t)), meta: t.items.reduce((a, i) => a + i.qty, 0) + ' items · opened ' + store.fmtTime(t.openedAt), hasBook: !!c && Math.abs(bal) >= 0.01, bookBal: fmt(bal), drinkLines, hasDrinkLines: drinkLines.length > 0, open: () => set({ activeTabId: t.id, cat: 'All' }) };
   });
   const regularsSorted = db.customers.map((c) => ({ c, v: store.visits(c.id) })).sort((a, b) => b.v - a.v);
   const regularBtns = regularsSorted.map(({ c, v }) => { const bal = store.bookBal(c); return { name: c.name, sub: v + ' visits', hasBal: Math.abs(bal) >= 0.01, balLabel: fmt(bal), start: () => store.startTab(c.id, c.name) }; });

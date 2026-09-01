@@ -51,6 +51,11 @@ const syncStatusLabel = computed(() => {
             <div class="card-title" style="font-size:22px">{{ t.name }} <span style="color:#a3781f;font-size:17px;letter-spacing:2px">{{ t.stars }}</span></div>
             <span v-if="t.hasBook" class="tag tag-outline">book {{ t.bookBal }}</span>
           </div>
+          <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column">
+            <button v-for="(d, di) in t.drinkLines" :key="di" type="button" class="btn btn-ghost" @click.stop="d.add" style="justify-content:space-between;min-height:30px;padding:2px 4px;font-size:14px;font-weight:400;font-family:var(--font-body)">
+              <span>{{ d.name }}</span><span style="color:var(--color-neutral-600)">× {{ d.qty }}</span>
+            </button>
+          </div>
           <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
           <div class="card-meta"><span>{{ t.meta }}</span></div>
         </div>
