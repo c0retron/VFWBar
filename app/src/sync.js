@@ -7,6 +7,7 @@ import { reactive } from 'vue';
 
 const CONFIG_KEY = 'vfw_pos_sync_config';
 const QUEUE_KEY = 'vfw_pos_sync_queue';
+const PRODUCTS_KEY = 'vfw_pos_sync_products_pending';
 
 function loadConfig() {
   try { return JSON.parse(localStorage.getItem(CONFIG_KEY)) || { url: '', secret: '' }; }
@@ -34,7 +35,7 @@ export const syncState = reactive({
 function refreshState() {
   const cfg = loadConfig();
   syncState.configured = !!cfg.url;
-  syncState.pendingCount = loadQueue().length;
+  syncState.pendingCount = loadQueue().length + (localStorage.getItem(PRODUCTS_KEY) ? 1 : 0);
 }
 
 export function getConfig() { return loadConfig(); }
@@ -53,6 +54,32 @@ export function enqueueDaySync(summary) {
   processQueue();
 }
 
+// Products are a "latest wins" snapshot, not a history -- unlike day
+// summaries, there's no value in queuing every intermediate edit if several
+// happen before the next successful sync.
+export function enqueueProductsSync(products) {
+  try { localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products)); } catch (e) { /* ignore */ }
+  processQueue();
+}
+
+// One-time pull of everything currently in the sheet, for setting up a
+// replacement tablet or resetting local data after clearing the sheet. This
+// is the one place sync.js reads back from the sheet rather than only
+// pushing to it -- ongoing sync stays one-way.
+export async function pullAll() {
+  const cfg = loadConfig();
+  if (!cfg.url) throw new Error('Google Sheets sync is not set up yet');
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: cfg.secret, type: 'pull' }),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'pull failed');
+  return data;
+}
+
 export function retrySync() { processQueue(); }
 
 let inFlight = false;
@@ -62,7 +89,8 @@ async function processQueue() {
   const cfg = loadConfig();
   if (!cfg.url) { refreshState(); return; }
   let q = loadQueue();
-  if (!q.length) { refreshState(); return; }
+  const pendingProducts = localStorage.getItem(PRODUCTS_KEY);
+  if (!q.length && !pendingProducts) { refreshState(); return; }
 
   inFlight = true;
   syncState.status = 'syncing';
@@ -74,6 +102,11 @@ async function processQueue() {
       saveQueue(q);
       syncState.lastSyncAt = Date.now();
       syncState.pendingCount = q.length;
+    }
+    if (pendingProducts) {
+      await postProducts(cfg, JSON.parse(pendingProducts));
+      localStorage.removeItem(PRODUCTS_KEY);
+      syncState.lastSyncAt = Date.now();
     }
     syncState.status = 'idle';
   } catch (err) {
@@ -102,6 +135,22 @@ async function postDay(cfg, summary) {
     if (data && data.ok === false) throw new Error(data.error || 'sync rejected');
   } catch (parseErr) {
     if (parseErr instanceof SyntaxError) return; // unreadable body, treat as sent
+    throw parseErr;
+  }
+}
+
+async function postProducts(cfg, products) {
+  const res = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ secret: cfg.secret, type: 'products', products }),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  try {
+    const data = await res.json();
+    if (data && data.ok === false) throw new Error(data.error || 'sync rejected');
+  } catch (parseErr) {
+    if (parseErr instanceof SyntaxError) return;
     throw parseErr;
   }
 }

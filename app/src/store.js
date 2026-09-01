@@ -4,7 +4,7 @@
 // than stylistic cleanup. See ../DESIGN_NOTES.md for the reasoning behind the
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
-import { enqueueDaySync } from './sync.js';
+import { enqueueDaySync, enqueueProductsSync } from './sync.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
@@ -13,7 +13,7 @@ class PosStore {
   constructor() {
     this.state = reactive({
       view: 'tabs', activeTabId: null, dlg: null, cat: 'All', salesCust: 'all',
-      startName: '', newRegName: '', tender: null, tenderCustom: '', payMethod: 'cash',
+      startName: '', tender: null, tenderCustom: '', payMethod: 'cash',
       bookMethod: 'cash', bookAmount: '', bookNote: '', ep: null, tip: 0, tipCustom: '',
       bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 },
     });
@@ -109,6 +109,7 @@ class PosStore {
   tab(id) { return this.db.tabs.find((t) => t.id === id); }
   tabTotal(t) { return t.items.reduce((a, i) => a + (i.comp || i.covered ? 0 : i.price * i.qty), 0); }
   visits(cid) { const ds = new Set(); this.db.sales.forEach((x) => { if (x.c === cid) ds.add(x.d); }); return ds.size; }
+  visits30(cid) { const cutoff = this.db.dayNumber - 30; const ds = new Set(); this.db.sales.forEach((x) => { if (x.c === cid && x.d > cutoff) ds.add(x.d); }); return ds.size; }
   usualsFor(cid) {
     const m = {}; this.db.sales.forEach((x) => { if (x.c === cid) m[x.p] = (m[x.p] || 0) + x.q; });
     return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 4).map((e) => this.db.products.find((p) => p.id === e[0])).filter((p) => p && p.active);
@@ -205,6 +206,12 @@ class PosStore {
     this.mut((db) => {
       const DN = db.dayNumber;
       const dayStart = this.date(DN);
+      // A plain ISO date (unlike dateLabel below) is guaranteed parseable by
+      // Date.parse() in any JS engine -- restoreFromPull() depends on reading
+      // this back correctly, and dateLabel's locale-formatted string isn't a
+      // safe bet across the Apps Script V8 runtime and whatever WebView the
+      // tablet has.
+      summary.dayIso = new Date(dayStart).toISOString().slice(0, 10);
       // Snapshot this day's detail into the summary, resolved to human-readable
       // names rather than internal ids — this is what gets synced to Sheets,
       // and db.sales gets pruned below, so the summary is the only durable
@@ -287,6 +294,71 @@ class PosStore {
     this.save();
     Object.assign(this.state, { view: 'tabs', activeTabId: null, dlg: null, bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 } });
   }
+
+  // Rebuilds all local data from a Google Sheet pull (see sync.js pullAll()).
+  // For a new/reformatted tablet, or to reset after wiping beta-test data in
+  // the sheet. Products and the book ledger reconstruct exactly (the ledger
+  // already carries real timestamps). Sales history is best-effort: the sheet
+  // only records which internal "day number" each sale happened on, so this
+  // re-derives real calendar dates from the Close-out tab's saved date label,
+  // then renumbers days 1..N in chronological order and anchors day N (the
+  // most recent) to its real date. If the bar ever skipped calendar days
+  // between closes, older reconstructed days compress those gaps -- day-of-week
+  // charts for old data may drift slightly, but "last 30 days" reporting (what
+  // actually matters day-to-day) anchors correctly off the most recent day.
+  restoreFromPull(data) {
+    const products = (data.products || []).map((r, i) => ({
+      id: 'p' + i, name: String(r.Name || ''), cat: String(r.Category || ''),
+      price: Number(r.Price) || 0, active: String(r.Active).toLowerCase() !== 'no',
+    }));
+    const prodByName = new Map(products.map((p) => [p.name, p]));
+
+    const dayDate = {};
+    (data.closeouts || []).forEach((r) => { const t = Date.parse(r.DateISO || r.Date); if (!isNaN(t)) dayDate[r.Day] = t; });
+    const oldDays = Object.keys(dayDate).map(Number).sort((a, b) => dayDate[a] - dayDate[b]);
+    const dayMap = {}; oldDays.forEach((oldD, i) => { dayMap[oldD] = i + 1; });
+    const N = oldDays.length;
+    const mostRecentMs = N ? dayDate[oldDays[N - 1]] : Date.now();
+    const epoch = mostRecentMs + (61 - N) * DAY;
+
+    const custByName = new Map();
+    const getCust = (name) => {
+      const key = (name || '').trim();
+      if (!key || key === 'Walk-in') return null;
+      if (!custByName.has(key)) custByName.set(key, { id: 'c' + custByName.size, name: key, ledger: [] });
+      return custByName.get(key);
+    };
+    (data.book || []).forEach((r) => {
+      const c = getCust(r.Customer); if (!c) return;
+      const ts = Date.parse(r.Timestamp);
+      c.ledger.push({ ts: isNaN(ts) ? Date.now() : ts, kind: String(r.Kind || 'charge'), amount: Number(r.Amount) || 0, method: r.Method || undefined, note: r.Note || undefined });
+    });
+
+    const sales = [];
+    (data.sales || []).forEach((r) => {
+      const newDay = dayMap[r.Day]; if (!newDay) return; // no matching close-out row for this day; skip
+      let prod = prodByName.get(r.Product);
+      if (!prod) { prod = { id: 'p' + products.length, name: String(r.Product || ''), cat: String(r.Category || ''), price: Number(r.Price) || 0, active: false }; products.push(prod); prodByName.set(prod.name, prod); }
+      const cust = getCust(r.Customer);
+      sales.push({ d: newDay, h: Number(r.Hour) || 12, p: prod.id, c: cust ? cust.id : null, q: Number(r.Qty) || 1, pr: Number(r.Price) || 0, pay: String(r.Payment || 'cash') });
+    });
+
+    const customers = Array.from(custByName.values());
+    this.mut((db) => {
+      db.epoch = epoch;
+      db.dayNumber = N + 1;
+      db.products = products;
+      db.customers = customers;
+      db.sales = sales;
+      db.tabs = [];
+      db.todayBookPays = [];
+      db.cardTips = 0;
+      db.guestSeq = 1;
+      db.days = [];
+      db.seq = 1000;
+    });
+    Object.assign(this.state, { view: 'tabs', activeTabId: null, dlg: null, bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 } });
+  }
 }
 
 export const store = new PosStore();
@@ -324,9 +396,27 @@ function renderVals() {
     });
     return { name: t.name, stars: '★'.repeat(Math.min((t.credits || []).length, 6)), total: fmt(store.tabTotal(t)), meta: t.items.reduce((a, i) => a + i.qty, 0) + ' items · opened ' + store.fmtTime(t.openedAt), hasBook: !!c && Math.abs(bal) >= 0.01, bookBal: fmt(bal), drinkLines, hasDrinkLines: drinkLines.length > 0, open: () => set({ activeTabId: t.id, cat: 'All' }) };
   });
-  const regularsSorted = db.customers.map((c) => ({ c, v: store.visits(c.id) })).sort((a, b) => b.v - a.v);
-  const regularBtns = regularsSorted.map(({ c, v }) => { const bal = store.bookBal(c); return { name: c.name, sub: v + ' visits', hasBal: Math.abs(bal) >= 0.01, balLabel: fmt(bal), start: () => store.startTab(c.id, c.name) }; });
-  const startNamed = () => { const n = S.startName.trim(); if (!n) return; set({ startName: '' }); store.startTab(null, n); };
+  // "Regulars" is derived, not admin-managed: whoever has actually visited in
+  // the last 30 days, most-frequent first. allCustomersSorted (all-time,
+  // alphabetical) backs the Sales customer filter separately, since that
+  // should still be able to look up anyone ever tracked, not just current
+  // regulars.
+  const activeRegulars = db.customers.map((c) => ({ c, v: store.visits30(c.id) })).filter(({ v }) => v > 0).sort((a, b) => b.v - a.v);
+  const regularBtns = activeRegulars.map(({ c, v }) => { const bal = store.bookBal(c); return { name: c.name, sub: v + ' visits', hasBal: Math.abs(bal) >= 0.01, balLabel: fmt(bal), start: () => store.startTab(c.id, c.name) }; });
+  const allCustomersSorted = db.customers.slice().sort((a, b) => a.name.localeCompare(b.name));
+  // Starting a tab with a typed name looks up-or-creates a tracked customer
+  // (case-insensitive match), rather than staying anonymous like a Guest
+  // walk-in -- this is what lets someone become a "regular" over time now
+  // that there's no manual Admin step to add them first.
+  const startNamed = () => {
+    const raw = S.startName.trim(); if (!raw) return;
+    set({ startName: '' });
+    const existing = db.customers.find((c) => c.name.trim().toLowerCase() === raw.toLowerCase());
+    if (existing) { store.startTab(existing.id, existing.name); return; }
+    const newId = store.uid();
+    store.mut((d) => d.customers.push({ id: newId, name: raw, ledger: [] }));
+    store.startTab(newId, raw);
+  };
 
   let det = {};
   if (activeTab) {
@@ -415,12 +505,17 @@ function renderVals() {
   const dowMax = Math.max(...dowAvg.map((d) => d.v), 1);
   const dowBars = dowAvg.map((d) => ({ label: d.label, amt: d.v > 0 ? '$' + Math.round(d.v) : '—', h: Math.max(Math.round((d.v / dowMax) * 100), d.v > 0 ? 3 : 0), bg: d.v === dowMax ? 'var(--color-accent)' : 'var(--color-accent-300)' }));
   const bestDow = dowAvg.reduce((a, b) => (b.v > a.v ? b : a), dowAvg[0]);
-  const hourSum = {}; s30.forEach((x) => { hourSum[x.h] = (hourSum[x.h] || 0) + x.q; });
-  const hourList = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
-  const hMax = Math.max(...hourList.map((h) => hourSum[h] || 0), 1);
-  const hLabel = (h) => (h === 12 ? '12p' : h > 12 ? h - 12 + 'p' : h + 'a');
-  const hourBars = hourList.map((h) => ({ label: hLabel(h), amt: (hourSum[h] || 0) + ' items ' + hLabel(h), h: Math.round(((hourSum[h] || 0) / hMax) * 100), bg: (hourSum[h] || 0) === hMax ? 'var(--color-accent)' : 'var(--color-accent-300)' }));
-  const bestHour = hourList.reduce((a, h) => ((hourSum[h] || 0) > (hourSum[a] || 0) ? h : a), 12);
+  const monthMap = {};
+  db.sales.forEach((x) => {
+    if (!inScope(x)) return;
+    const dt = new Date(store.date(x.d));
+    const key = dt.getFullYear() + '-' + String(dt.getMonth()).padStart(2, '0');
+    if (!monthMap[key]) monthMap[key] = { key, label: dt.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), sum: 0 };
+    monthMap[key].sum += rev(x);
+  });
+  const monthList = Object.values(monthMap).sort((a, b) => a.key.localeCompare(b.key));
+  const monthMax = Math.max(...monthList.map((m) => m.sum), 1);
+  const monthBars = monthList.map((m, i) => ({ label: m.label, amt: '$' + Math.round(m.sum), h: Math.max(Math.round((m.sum / monthMax) * 100), m.sum > 0 ? 3 : 0), bg: i === monthList.length - 1 ? 'var(--color-accent)' : 'var(--color-accent-300)' }));
   const dayRev = {}; s30.forEach((x) => { dayRev[x.d] = (dayRev[x.d] || 0) + rev(x); });
   const dayList = []; for (let d = DN - 29; d <= DN; d++) dayList.push(d);
   const dMax = Math.max(...dayList.map((d) => dayRev[d] || 0), 1);
@@ -431,12 +526,11 @@ function renderVals() {
   const shopUnits = {}, shopRev = {};
   s10.forEach((x) => { shopUnits[x.p] = (shopUnits[x.p] || 0) + x.q; shopRev[x.p] = (shopRev[x.p] || 0) + rev(x); });
   const shopRows = Object.keys(shopUnits).map((pid) => { const p = db.products.find((pp) => pp.id === pid); return p ? { name: p.name, cat: p.cat, units: shopUnits[pid], perDay: (shopUnits[pid] / 10).toFixed(1), rev: fmt(shopRev[pid]) } : null; }).filter(Boolean).sort((a, b) => b.units - a.units);
-  const custOptions = [{ id: 'all', name: 'Everyone' }, { id: '_guest', name: 'Walk-ins / guests' }].concat(regularsSorted.map(({ c }) => ({ id: c.id, name: c.name })));
+  const custOptions = [{ id: 'all', name: 'Everyone' }, { id: '_guest', name: 'Walk-ins / guests' }].concat(allCustomersSorted.map((c) => ({ id: c.id, name: c.name })));
   const kpis = [
     { kick: 'Net sales · last 30 days', val: fmt(rev30), sub: (delta >= 0 ? '+' : '') + delta + '% vs prior 30 days' },
     { kick: 'Items rung · last 30 days', val: String(items30), sub: bestProd ? 'Best seller: ' + bestProd.name + ' (' + bestP[1] + ')' : '—' },
     { kick: 'Busiest day', val: bestDow && bestDow.v > 0 ? bestDow.label : '—', sub: bestDow && bestDow.v > 0 ? '$' + Math.round(bestDow.v) + ' avg night' : 'no sales in range' },
-    { kick: 'Busiest hour', val: hLabel(bestHour) + '–' + hLabel(bestHour + 1), sub: (hourSum[bestHour] || 0) + ' items in 30 days' },
   ];
   let custPanel = false, custStats = [], custPanelTitle = '';
   if (scopeCust !== 'all' && scopeCust !== '_guest') {
@@ -643,6 +737,7 @@ function renderVals() {
           if (ep.id) { const p = d.products.find((x) => x.id === ep.id); p.name = nm; p.price = pr; p.cat = ep.cat; }
           else d.products.push({ id: store.uid(), name: nm, price: pr, cat: ep.cat, active: true });
         });
+        syncProducts();
         set({ dlg: null, ep: null });
       },
     });
@@ -664,13 +759,14 @@ function renderVals() {
     });
   }
 
+  const syncProducts = () => enqueueProductsSync(db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
   const prodRows = db.products.map((p) => ({
     name: p.name, cat: p.cat, price: fmt(p.price), dim: p.active ? '1' : '0.4',
     activeLabel: p.active ? 'Active' : 'Retired',
-    toggle: () => store.mut((d) => { const x = d.products.find((q) => q.id === p.id); x.active = !x.active; }),
+    toggle: () => { store.mut((d) => { const x = d.products.find((q) => q.id === p.id); x.active = !x.active; }); syncProducts(); },
     edit: () => set({ dlg: { kind: 'editProduct' }, ep: { id: p.id, origName: p.name, name: p.name, price: String(p.price), cat: p.cat } }),
+    del: () => { store.mut((d) => { d.products = d.products.filter((q) => q.id !== p.id); }); syncProducts(); },
   }));
-  const regRows = regularsSorted.map(({ c, v }) => { const b = store.bookBal(c); return { name: c.name, sub: v + ' visits' + (Math.abs(b) >= 0.01 ? ' · book ' + fmt(b) : '') }; });
 
   return Object.assign({
     navItems, dayLabel, openCountLabel: openTabs.length + (openTabs.length === 1 ? ' open tab' : ' open tabs'),
@@ -686,7 +782,7 @@ function renderVals() {
     bookRows, bookOwedTotal: fmt(owed), bookOwedSub: owedN + ' members owe', bookCreditTotal: fmt(cred), bookCreditSub: credN + ' members in credit',
     custOptions, salesCust: S.salesCust, onSalesCust: (e) => set({ salesCust: e.target.value }),
     salesScopeLabel: scopeCust === 'all' ? 'whole canteen' : (custOptions.find((o) => o.id === scopeCust) || {}).name,
-    kpis, dowBars, hourBars, dailyBars, dailyStart: store.fmtDate(store.date(DN - 29)), dailyEnd: 'today',
+    kpis, dowBars, monthBars, dailyBars, dailyStart: store.fmtDate(store.date(DN - 29)), dailyEnd: 'today',
     catRows, shopRows, custPanel, custPanelTitle, custStats,
     coDate: 'Day ' + DN + ' — ' + new Date(store.date(DN)).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
     coRows, coExpected: fmt(expected), coCardBatch: fmt(cardSales + bookPayCard),
@@ -696,8 +792,6 @@ function renderVals() {
     hasOpenTabsWarn: openTabs.length > 0, openTabNames: openNames,
     closeDayDisabled: !canClose, closeDayHint, doCloseDay,
     prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer' } }),
-    regRows, newRegName: S.newRegName, onNewRegName: (e) => set({ newRegName: e.target.value }),
-    addRegular: () => { const n = S.newRegName.trim(); if (!n) return; store.mut((d) => d.customers.push({ id: store.uid(), name: n, ledger: [] })); set({ newRegName: '' }); },
     tillVal: String(db.tillTarget), onTill: (e) => store.mut((d) => { d.tillTarget = Math.max(50, Number(e.target.value) || 200); }),
     resetDemo: () => store.resetDemo(),
   }, det, dlgVals);

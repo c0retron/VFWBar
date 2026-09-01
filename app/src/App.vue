@@ -5,14 +5,31 @@
 // (sc-if -> v-if, sc-for -> v-for, {{ }} bindings unchanged) so it stays easy to
 // diff against the reviewed prototype if something looks off.
 import { ref, computed } from 'vue';
-import { vm } from './store.js';
+import { vm, store } from './store.js';
 import { isDark, toggleDark } from './theme.js';
-import { syncState, getConfig, setConfig, retrySync } from './sync.js';
+import { syncState, getConfig, setConfig, retrySync, pullAll } from './sync.js';
 
 const initialCfg = getConfig();
 const sheetsUrl = ref(initialCfg.url);
 const sheetsSecret = ref(initialCfg.secret);
 function saveSheetsConfig() { setConfig(sheetsUrl.value, sheetsSecret.value); }
+
+const restoring = ref(false);
+const restoreStatus = ref('');
+async function doRestore() {
+  if (!confirm("This replaces everything on this tablet — products, tabs, book balances, and sales history — with what's currently in the Google Sheet. This can't be undone. Continue?")) return;
+  restoring.value = true;
+  restoreStatus.value = 'Pulling from sheet…';
+  try {
+    const data = await pullAll();
+    store.restoreFromPull(data);
+    restoreStatus.value = 'Restored ' + (data.products || []).length + ' products, ' + (data.book || []).length + ' book entries, ' + (data.sales || []).length + ' sales rows.';
+  } catch (err) {
+    restoreStatus.value = 'Restore failed: ' + (err.message || err);
+  } finally {
+    restoring.value = false;
+  }
+}
 
 const syncStatusLabel = computed(() => {
   if (!syncState.configured) return 'Not set up yet — paste in the Web App URL above and save.';
@@ -210,7 +227,7 @@ const syncStatusLabel = computed(() => {
         <option v-for="(o, i) in vm.custOptions" :key="i" :value="o.id">{{ o.name }}</option>
       </select>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3)">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)">
       <div v-for="(k, i) in vm.kpis" :key="i" class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">{{ k.kick }}</div>
@@ -234,14 +251,15 @@ const syncStatusLabel = computed(() => {
       </div>
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <div class="card-kicker">Busiest hours · drinks rung, last 30 days</div>
-        <div style="display:flex;align-items:flex-end;gap:3px;height:150px;border-bottom:1.5px solid var(--color-divider);padding-top:var(--space-2)">
-          <div v-for="(b, i) in vm.hourBars" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%" :title="b.amt">
-            <div :style="`width:100%;height:${b.h}%;background:${b.bg}`"></div>
+        <div class="card-kicker">Sales by month</div>
+        <div style="display:flex;align-items:flex-end;gap:var(--space-2);height:150px;border-bottom:1.5px solid var(--color-divider);padding-top:var(--space-2)">
+          <div v-for="(b, i) in vm.monthBars" :key="i" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%" :title="b.amt">
+            <span style="font-size:11px;color:var(--color-neutral-600)">{{ b.amt }}</span>
+            <div :style="`width:70%;height:${b.h}%;background:${b.bg}`"></div>
           </div>
         </div>
-        <div style="display:flex;gap:3px">
-          <span v-for="(b, i) in vm.hourBars" :key="i" style="flex:1;text-align:center;font-size:10px;color:var(--color-neutral-600)">{{ b.label }}</span>
+        <div style="display:flex;gap:var(--space-2)">
+          <span v-for="(b, i) in vm.monthBars" :key="i" style="flex:1;text-align:center;font-size:11px;color:var(--color-neutral-600)">{{ b.label }}</span>
         </div>
       </div>
     </div>
@@ -369,14 +387,14 @@ const syncStatusLabel = computed(() => {
 
   <!-- Admin -->
   <div v-if="vm.viewAdmin" style="flex:1;min-height:0;display:flex;gap:var(--space-4);padding:var(--space-4)">
-    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--space-2)">
+    <div style="flex:1.3;min-width:0;display:flex;flex-direction:column;gap:var(--space-2)">
       <div style="display:flex;align-items:center;gap:var(--space-2)">
         <h6 style="margin:0;color:var(--color-accent-700)">Products &amp; prices</h6>
         <button type="button" class="btn" @click="vm.addProduct" style="margin-left:auto;min-height:44px">+ Add product</button>
       </div>
       <div style="flex:1;min-height:0;overflow-y:auto">
         <table class="table">
-          <thead><tr><th>Product</th><th>Category</th><th style="text-align:right">Price</th><th>Status</th><th style="text-align:right"></th></tr></thead>
+          <thead><tr><th>Product</th><th>Category</th><th style="text-align:right">Price</th><th>Status</th><th style="text-align:right"></th><th style="text-align:right"></th></tr></thead>
           <tbody>
             <tr v-for="(p, i) in vm.prodRows" :key="i">
               <td :style="`font-size:15px;opacity:${p.dim}`">{{ p.name }}</td>
@@ -384,25 +402,13 @@ const syncStatusLabel = computed(() => {
               <td style="text-align:right">{{ p.price }}</td>
               <td><button type="button" class="btn btn-ghost" @click="p.toggle" style="min-height:40px;font-size:12px">{{ p.activeLabel }}</button></td>
               <td style="text-align:right"><button type="button" class="btn btn-ghost" @click="p.edit" style="min-height:40px">Edit</button></td>
+              <td style="text-align:right"><button type="button" class="btn btn-ghost" @click="p.del" style="min-height:40px;color:var(--color-accent-700)">Delete</button></td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
-    <div style="flex:none;width:280px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
-      <h6 style="margin:0;color:var(--color-accent-700)">Regulars</h6>
-      <div style="display:flex;gap:var(--space-1)">
-        <input class="input" placeholder="Add a regular…" :value="vm.newRegName" @change="vm.onNewRegName" style="min-height:44px">
-        <button type="button" class="btn" @click="vm.addRegular" style="min-height:44px">Add</button>
-      </div>
-      <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
-        <div v-for="(r, i) in vm.regRows" :key="i" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--mix-text-22)">
-          <span style="font-size:15px">{{ r.name }}</span>
-          <span style="font-size:12px;color:var(--color-neutral-600)">{{ r.sub }}</span>
-        </div>
-      </div>
-    </div>
-    <div style="flex:none;width:300px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:320px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin:0;color:var(--color-accent-700)">Settings</h6>
       <div class="field">
         <label>Till change target</label>
@@ -411,7 +417,7 @@ const syncStatusLabel = computed(() => {
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">Google Sheets sync</div>
-        <p class="card-body" style="margin:0">This app saves everything on the tablet and works offline. Each day's sales, book entries and close-out sheet sync here in the background when you close the day. See google-apps-script/SETUP.md for one-time setup.</p>
+        <p class="card-body" style="margin:0">This app saves everything on the tablet and works offline. Sales, book entries, close-out, and the product list sync here in the background. See google-apps-script/SETUP.md for one-time setup.</p>
         <div class="field"><label>Web App URL</label><input class="input" placeholder="https://script.google.com/macros/s/…/exec" v-model="sheetsUrl" style="min-height:44px"></div>
         <div class="field"><label>Shared secret</label><input class="input" type="password" v-model="sheetsSecret" style="min-height:44px"></div>
         <div style="display:flex;gap:var(--space-1)">
@@ -419,6 +425,9 @@ const syncStatusLabel = computed(() => {
           <button type="button" class="btn btn-ghost" @click="retrySync" :disabled="!syncState.configured" style="min-height:44px">Sync now</button>
         </div>
         <div style="font-size:12px;color:var(--color-neutral-600)">{{ syncStatusLabel }}</div>
+        <div class="hr" style="margin:var(--space-1) 0"></div>
+        <button type="button" class="btn btn-ghost" @click="doRestore" :disabled="!syncState.configured || restoring" style="min-height:44px">Restore from Google Sheet…</button>
+        <div v-if="restoreStatus" style="font-size:12px;color:var(--color-neutral-600)">{{ restoreStatus }}</div>
       </div>
       <button type="button" class="btn btn-ghost" @click="vm.resetDemo" style="min-height:44px;color:var(--color-accent-700)">Reset demo data</button>
     </div>
