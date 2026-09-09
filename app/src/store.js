@@ -59,6 +59,10 @@ class PosStore {
       if (p.restockUnit == null) p.restockUnit = restockUnitFor(p.cat);
     });
     if (!db.shoppingLists) db.shoppingLists = [];
+    // Total 24-packs of beer that fit in storage, shared across all beer
+    // products -- liquor has no such cap (shelf space isn't the constraint
+    // there), just the existing usage-based suggestion.
+    if (db.beerCaseCapacity == null) db.beerCaseCapacity = 20;
   }
 
   save() { try { localStorage.setItem(KEY, JSON.stringify(this.db)); } catch (e) { /* storage full/unavailable */ } }
@@ -131,7 +135,7 @@ class PosStore {
       { id: 't2', name: 'Mac', custId: 'c3', openedAt: now - 31 * 6e4, items: [{ id: 'i3', prodId: 'p1', name: 'Budweiser', price: 2.75, qty: 1, comp: false }] },
       { id: 't3', name: 'Guest 1', custId: null, openedAt: now - 12 * 6e4, items: [{ id: 'i4', prodId: 'p5', name: 'Mich Ultra', price: 3, qty: 1, comp: false }, { id: 'i5', prodId: 'p17', name: 'Chips', price: 1, qty: 1, comp: false }] },
     ];
-    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [] };
+    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, beerCaseCapacity: 20, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [] };
   }
 
   bookBal(c) { return c.ledger.reduce((a, e) => a + (e.kind === 'charge' ? e.amount : -e.amount), 0); }
@@ -549,7 +553,7 @@ function renderVals() {
   }
   const cats = ['All', 'Beer', 'Liquor', 'Wine', 'Soda', 'Food'];
   const catOpts = cats.map((cn) => ({ label: cn, on: S.cat === cn, pick: () => set({ cat: cn }) }));
-  const prodBtns = db.products.filter((p) => p.active && (S.cat === 'All' || p.cat === S.cat)).map((p) => ({ name: p.name, price: fmt(p.price), add: () => activeTab && store.addItem(activeTab.id, p) }));
+  const prodBtns = db.products.filter((p) => p.active && (S.cat === 'All' || p.cat === S.cat)).sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ name: p.name, price: fmt(p.price), add: () => activeTab && store.addItem(activeTab.id, p) }));
 
   const bookRows = db.customers.map((c) => {
     const bal = store.bookBal(c);
@@ -712,7 +716,26 @@ function renderVals() {
       const suggested = shortfall > 0 ? Math.ceil(shortfall / p.restockUnit) : 0;
       return { prodId: p.id, name: p.name, cat: p.cat, restockUnit: p.restockUnit, currentQty: p.qty, dailyRate: Math.round(dailyRate * 10) / 10, units: suggested };
     });
-    set({ dlg: { kind: 'shoppingList', items } });
+    // Beer only has a hard shelf cap (liquor is "unconstrained" -- the rate
+    // targeting above is already the only check there). If total suggested
+    // cases would push on-hand + new beyond the cap, trim slowest-moving
+    // beers first so the fastest sellers keep as much of their suggestion as
+    // the remaining shelf space allows.
+    const beerCap = db.beerCaseCapacity || 0;
+    let onHandBeerCases = 0;
+    if (beerCap > 0) {
+      onHandBeerCases = db.products.filter((p) => p.cat === 'Beer').reduce((a, p) => a + p.qty / (p.restockUnit || 24), 0);
+      const capRemaining = Math.max(0, Math.floor(beerCap - onHandBeerCases));
+      const beerItems = items.filter((it) => it.cat === 'Beer').sort((a, b) => a.dailyRate - b.dailyRate);
+      let excess = beerItems.reduce((a, it) => a + it.units, 0) - capRemaining;
+      for (const it of beerItems) {
+        if (excess <= 0) break;
+        const cut = Math.min(it.units, excess);
+        it.units -= cut;
+        excess -= cut;
+      }
+    }
+    set({ dlg: { kind: 'shoppingList', items, beerCap, onHandBeerCases: Math.round(onHandBeerCases * 10) / 10 } });
   };
   const openShoppingHistory = () => set({ dlg: { kind: 'shoppingHistory' } });
 
@@ -881,6 +904,8 @@ function renderVals() {
         dec: () => { const next = items.slice(); next[idx] = Object.assign({}, it, { units: Math.max(0, it.units - 1) }); setItems(next); },
       })),
       shoppingOrderedCount: items.filter((it) => it.units > 0).length,
+      hasBeerCap: dlg.beerCap > 0,
+      beerCapLabel: dlg.beerCap > 0 ? dlg.onHandBeerCases + ' of ' + dlg.beerCap + ' case cap on hand' : '',
       confirmShoppingList: () => {
         const finalItems = items.filter((it) => it.units > 0).map((it) => ({ prodId: it.prodId, name: it.name, cat: it.cat, units: it.units, restockUnit: it.restockUnit, unitsAdded: Math.round(it.units * it.restockUnit * 100) / 100 }));
         let list;
@@ -957,6 +982,7 @@ function renderVals() {
     tabsOverviewRows, openTabsOverview, openShoppingList, openShoppingHistory,
     prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer', qty: '0', unitsPerSale: '1', restockUnit: String(restockUnitFor('Beer')) } }),
     tillVal: String(db.tillTarget), onTill: (e) => store.mut((d) => { d.tillTarget = Math.max(50, Number(e.target.value) || 200); }),
+    beerCapVal: String(db.beerCaseCapacity), onBeerCap: (e) => store.mut((d) => { d.beerCaseCapacity = Math.max(0, Number(e.target.value) || 0); }),
     resetDemo: () => store.resetDemo(),
   }, det, dlgVals);
 }

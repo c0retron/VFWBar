@@ -108,10 +108,10 @@ const syncStatusLabel = computed(() => {
             <span v-if="t.hasBook" class="tag tag-outline">book {{ t.bookBal }}</span>
           </div>
           <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column;gap:1px">
-            <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:6px;min-height:26px;font-size:14px">
+            <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:8px;min-height:36px;font-size:14px">
               <span style="flex:1;min-width:0">{{ d.name }}</span>
-              <span style="color:var(--color-neutral-600)">× {{ d.qty }}</span>
-              <button type="button" class="btn" @click.stop="d.add" aria-label="add one more" style="min-width:34px;min-height:26px;padding:0 6px;font-size:12px;color:var(--color-accent-700)">+1</button>
+              <span style="font-size:17px;font-weight:600;color:var(--color-neutral-600)">× {{ d.qty }}</span>
+              <button type="button" class="btn" @click.stop="d.add" aria-label="add one more" style="min-width:44px;min-height:36px;padding:0 8px;font-size:15px;font-weight:600;color:var(--color-accent-700)">+1</button>
             </div>
           </div>
           <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
@@ -466,6 +466,10 @@ const syncStatusLabel = computed(() => {
         <label>Till change target</label>
         <input class="input" type="number" step="25" min="50" :value="vm.tillVal" @change="vm.onTill" style="min-height:44px">
       </div>
+      <div class="field">
+        <label>Max beer storage (24-packs)</label>
+        <input class="input" type="number" step="1" min="0" :value="vm.beerCapVal" @change="vm.onBeerCap" style="min-height:44px">
+      </div>
       <div class="card blueprint">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
         <div class="card-kicker">Google Sheets sync</div>
@@ -637,6 +641,7 @@ const syncStatusLabel = computed(() => {
       <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <div class="dialog-title">Suggested shopping list</div>
       <p class="dialog-body" style="margin:0;font-size:13px;color:var(--color-neutral-600)">Based on sales since the last confirmed list, aiming for about two weeks of stock at each item's current pace. Adjust anything before confirming — confirming adds these quantities straight to inventory.</p>
+      <p v-if="vm.hasBeerCap" class="dialog-body" style="margin:0;font-size:12px;color:var(--color-neutral-600)">Beer storage cap: {{ vm.beerCapLabel }} — suggestions are trimmed to fit, slowest movers first.</p>
       <div style="max-height:380px;overflow-y:auto">
         <table class="table">
           <thead><tr><th>Product</th><th style="text-align:right">On hand</th><th style="text-align:right">Daily rate</th><th style="text-align:center">Order</th><th style="text-align:right">Adds</th></tr></thead>
