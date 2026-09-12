@@ -9,6 +9,7 @@ import { vm, store } from './store.js';
 import { isDark, toggleDark } from './theme.js';
 import { syncState, getConfig, setConfig, retrySync, pullAll, enqueueAllDays, enqueueProductsSync } from './sync.js';
 import { weather } from './weather.js';
+import { getConfig as getPrinterConfig, setConfig as setPrinterConfig, printerState, testPrint } from './printer.js';
 
 function iconSvg(cat) {
   const a = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"';
@@ -30,6 +31,22 @@ function syncNow() {
   enqueueProductsSync(store.db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
   retrySync();
 }
+
+const initialPrinterCfg = getPrinterConfig();
+const printerIp = ref(initialPrinterCfg.ip);
+const printerPort = ref(String(initialPrinterCfg.port));
+const printerWidth = ref(String(initialPrinterCfg.width));
+const printerEnabled = ref(!!initialPrinterCfg.enabled);
+function savePrinterConfig() {
+  setPrinterConfig({ ip: printerIp.value.trim(), port: Number(printerPort.value) || 9100, width: Number(printerWidth.value) || 32, enabled: printerEnabled.value });
+}
+const printerStatusLabel = computed(() => {
+  if (!printerEnabled.value) return 'Printing is off.';
+  if (printerState.status === 'printing') return 'Printing…';
+  if (printerState.status === 'error') return 'Last print failed: ' + printerState.lastError;
+  if (printerState.lastPrintAt) return 'Last printed ' + new Date(printerState.lastPrintAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return 'Ready — prints automatically on tab close and day close.';
+});
 
 const restoring = ref(false);
 const restoreStatus = ref('');
@@ -100,22 +117,24 @@ const syncStatusLabel = computed(() => {
         <h6 style="margin: 0; color: var(--color-accent-700); font-size: 18px">Open tabs</h6>
         <span style="font-size:12px;color:var(--color-neutral-600)">{{ vm.tabsHint }}</span>
       </div>
-      <div v-if="vm.hasTabs" style="flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:var(--space-3);align-content:start">
-        <div v-for="(t, i) in vm.tabCards" :key="i" class="card blueprint" role="button" tabindex="0" @click="t.open" style="cursor:pointer;gap:var(--space-1);min-height:128px">
-          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-          <div style="display:flex;justify-content:space-between;align-items:start;gap:var(--space-2)">
-            <div class="card-title" style="font-size:22px">{{ t.name }} <span style="color:#a3781f;font-size:17px;letter-spacing:2px">{{ t.stars }}</span></div>
-            <span v-if="t.hasBook" class="tag tag-outline">book {{ t.bookBal }}</span>
-          </div>
-          <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column;gap:1px">
-            <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:8px;min-height:36px;font-size:14px">
-              <span style="flex:1;min-width:0">{{ d.name }}</span>
-              <span style="font-size:17px;font-weight:600;color:var(--color-neutral-600)">× {{ d.qty }}</span>
-              <button type="button" class="btn" @click.stop="d.add" aria-label="add one more" style="min-width:44px;min-height:36px;padding:0 8px;font-size:15px;font-weight:600;color:var(--color-accent-700)">+1</button>
+      <div v-if="vm.hasTabs" style="flex:1;min-height:0;overflow-y:auto;display:flex;gap:var(--space-3);align-items:start">
+        <div v-for="(col, ci) in vm.tabColumns" :key="ci" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:var(--space-3)">
+          <div v-for="(t, i) in col" :key="i" class="card blueprint" role="button" tabindex="0" @click="t.open" style="cursor:pointer;gap:var(--space-1);min-height:128px">
+            <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:var(--space-2)">
+              <div class="card-title" style="font-size:22px">{{ t.name }} <span style="color:#a3781f" v-html="t.stars"></span></div>
+              <span v-if="t.hasBook" class="tag tag-outline">book {{ t.bookBal }}</span>
             </div>
+            <div v-if="t.hasDrinkLines" style="display:flex;flex-direction:column;gap:1px">
+              <div v-for="(d, di) in t.drinkLines" :key="di" style="display:flex;align-items:center;gap:8px;min-height:36px;font-size:14px">
+                <span style="flex:1;min-width:0">{{ d.name }}</span>
+                <span style="font-size:17px;font-weight:600;color:var(--color-neutral-600)">× {{ d.qty }}</span>
+                <button type="button" class="btn" @click.stop="d.add" aria-label="add one more" style="min-width:44px;min-height:36px;padding:0 8px;font-size:15px;font-weight:600;color:var(--color-accent-700)">+1</button>
+              </div>
+            </div>
+            <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
+            <div class="card-meta"><span>{{ t.meta }}</span></div>
           </div>
-          <div style="font-family:var(--font-heading);font-size:30px;color:var(--color-accent-700);margin-top:auto">{{ t.total }}</div>
-          <div class="card-meta"><span>{{ t.meta }}</span></div>
         </div>
       </div>
       <div v-if="vm.noTabs" class="card blueprint" style="flex:none;padding:var(--space-6);align-items:center;text-align:center">
@@ -159,7 +178,7 @@ const syncStatusLabel = computed(() => {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width: 32px; height: 31px"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
           Tabs
         </button>
-        <span style="color:#a3781f;font-size:19px;letter-spacing:2px">{{ vm.detStars }}</span>
+        <span style="color:#a3781f" v-html="vm.detStars"></span>
         <span v-if="vm.detHasBook" class="tag tag-outline">book {{ vm.detBookBal }}</span>
         <h3 style="margin:0">{{ vm.detName }}</h3><span style="margin-left:auto;font-size:12px;color:var(--color-neutral-600)">{{ vm.detMeta }}</span>
       </div>
@@ -171,13 +190,13 @@ const syncStatusLabel = computed(() => {
             <span style="font-family:var(--font-heading);font-size:19px;min-width:26px;text-align:center">{{ it.qty }}</span>
             <button type="button" class="btn btn-ghost" @click="it.inc" aria-label="more" style="min-width:44px;min-height:44px;font-size:20px">+</button>
           </span>
-          <span v-if="it.locked" style="display:inline-block;min-width:114px;text-align:center;font-size:19px;color:#a3781f">★</span>
+          <span v-if="it.locked" style="display:inline-block;min-width:114px;text-align:center;color:#a3781f"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:inline"><path d="M12 2.5l2.97 6.53 7.03.66-5.31 4.9 1.5 7.16L12 17.9l-6.19 3.85 1.5-7.16-5.31-4.9 7.03-.66L12 2.5Z"></path></svg></span>
           <span style="flex:1;min-width:0">
             <span style="font-size:17px">{{ it.name }}</span>
-            <span v-if="it.hasNote" :style="`font-size:12px;color:${it.noteCol}`"> · {{ it.note }}</span>
+            <span v-if="it.hasNote" :style="`font-size:12px;color:${it.noteCol}`"> · <span v-html="it.note"></span></span>
             <span v-if="it.comped" class="tag tag-accent" style="margin-left:8px">COMP</span>
           </span>
-          <button v-if="it.canApply" type="button" class="btn btn-ghost" @click="it.applyRound" style="min-height:44px;font-size:12px;color:#7a5c12">★ Apply</button>
+          <button v-if="it.canApply" type="button" class="btn btn-ghost" @click="it.applyRound" style="min-height:44px;font-size:12px;color:#7a5c12"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline;vertical-align:-1px"><path d="M12 2.5l2.97 6.53 7.03.66-5.31 4.9 1.5 7.16L12 17.9l-6.19 3.85 1.5-7.16-5.31-4.9 7.03-.66L12 2.5Z"></path></svg> Apply</button>
           <button v-if="it.canComp" type="button" class="btn btn-ghost" @click="it.comp" style="min-height:44px;font-size:12px">{{ it.compLabel }}</button>
           <button v-if="it.canTransfer" type="button" class="btn btn-ghost" @click="it.transfer" style="min-height:44px;font-size:12px">Transfer</button>
           <span style="width:76px;text-align:right;font-size:17px">{{ it.line }}</span>
@@ -201,7 +220,7 @@ const syncStatusLabel = computed(() => {
       </div>
     </div>
     <div style="flex:none;width:340px;display:flex;flex-direction:column;gap:var(--space-2);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
-      <div v-if="vm.hasCredits" style="border:1px solid #a3781f;padding:var(--space-2);font-size:13px;color:#7a5c12">{{ vm.creditBanner }}</div>
+      <div v-if="vm.hasCredits" style="border:1px solid #a3781f;padding:var(--space-2);font-size:13px;color:#7a5c12" v-html="vm.creditBanner"></div>
       <template v-if="vm.hasUsuals">
         <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700)">{{ vm.usualsTitle }}</div>
         <div style="display:flex;flex-wrap:wrap;gap:var(--space-1)">
@@ -380,6 +399,11 @@ const syncStatusLabel = computed(() => {
             </div>
           </div>
         </div>
+        <div v-if="vm.hasCardTips" class="card blueprint" style="border-color:var(--color-accent);align-items:center">
+          <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+          <div class="card-kicker">Bartender's card tips — pay out in cash</div>
+          <div style="font-family:var(--font-heading);font-size:38px;color:var(--color-accent-700)">{{ vm.coCardTips }}</div>
+        </div>
         <div v-if="vm.hasOpenTabsWarn" class="card blueprint" style="border-color:var(--color-accent)">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
           <div class="card-kicker">Still open — settle before closing</div>
@@ -486,6 +510,19 @@ const syncStatusLabel = computed(() => {
         <div v-if="restoreStatus" style="font-size:12px;color:var(--color-neutral-600)">{{ restoreStatus }}</div>
         <button type="button" class="btn btn-ghost" @click="resendAllDays" :disabled="!syncState.configured" style="min-height:44px;font-size:12px">Re-send all closed days…</button>
       </div>
+      <div class="card blueprint">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div class="card-kicker">Receipt printer (WiFi)</div>
+        <p class="card-body" style="margin:0">Prints a customer receipt when a tab closes, and a day summary + tomorrow's till breakdown when the day closes. Requires an ESC/POS network printer on the same WiFi (port 9100 unless yours is different).</p>
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" :checked="printerEnabled" @change="printerEnabled = $event.target.checked; savePrinterConfig()" style="width:18px;height:18px">Enable printing</label>
+        <div style="display:flex;gap:var(--space-1)">
+          <div class="field" style="flex:2"><label>Printer IP</label><input class="input" placeholder="192.168.1.50" v-model="printerIp" @change="savePrinterConfig" style="min-height:44px"></div>
+          <div class="field" style="flex:1"><label>Port</label><input class="input" type="number" v-model="printerPort" @change="savePrinterConfig" style="min-height:44px"></div>
+        </div>
+        <div class="field"><label>Receipt width (characters — 32 for 58mm paper, 42-48 for 80mm)</label><input class="input" type="number" v-model="printerWidth" @change="savePrinterConfig" style="min-height:44px"></div>
+        <button type="button" class="btn" @click="testPrint" :disabled="!printerEnabled" style="min-height:44px">Test print</button>
+        <div style="font-size:12px;color:var(--color-neutral-600)">{{ printerStatusLabel }}</div>
+      </div>
       <button type="button" class="btn btn-ghost" @click="vm.resetDemo" style="min-height:44px;color:var(--color-accent-700)">Reset demo data</button>
     </div>
   </div>
@@ -496,7 +533,7 @@ const syncStatusLabel = computed(() => {
       <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <div class="dialog-title">Close out — {{ vm.dlgTabName }}</div>
       <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <span style="font-size:13px;color:var(--color-neutral-600)">{{ vm.dlgItemsSummary }}</span>
+        <span style="font-size:13px;color:var(--color-neutral-600)" v-html="vm.dlgItemsSummary"></span>
         <span style="font-family:var(--font-heading);font-size:36px;color:var(--color-accent-700)">{{ vm.dlgTotal }}</span>
       </div>
       <div class="seg" style="display:flex">
@@ -524,7 +561,7 @@ const syncStatusLabel = computed(() => {
         <p class="dialog-body" style="margin:0;font-size:13px;color:var(--color-neutral-600)">Run it, then confirm here. Card tips are paid out to the bartender from the till at close-out.</p>
       </div>
       <p v-if="vm.payBook" class="dialog-body" style="margin:0">{{ vm.bookPreview }}</p>
-      <p v-if="vm.closeCreditWarn" class="dialog-body" style="margin:0;color:#7a5c12">{{ vm.closeCreditWarnText }}</p>
+      <p v-if="vm.closeCreditWarn" class="dialog-body" style="margin:0;color:#7a5c12" v-html="vm.closeCreditWarnText"></p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Cancel</button>
         <button type="button" class="btn btn-primary blueprint" @click="vm.confirmClose" :disabled="vm.confirmCloseDisabled" style="min-height:48px;padding:0 var(--space-4)">
@@ -555,11 +592,10 @@ const syncStatusLabel = computed(() => {
     <div v-if="vm.dlgRound" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg);width:min(520px,100%)">
       <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
       <div class="dialog-title">Buy a round — on {{ vm.dlgTabName }}</div>
-      <p class="dialog-body" style="margin:0">How many people on each tab? Everyone gets a <span style="color:#a3781f">★</span> — their next drink rings up as {{ vm.dlgTabName }}'s round.</p>
+      <p class="dialog-body" style="margin:0">How many people on each tab? Everyone gets a <span style="color:#a3781f"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="display:inline;vertical-align:-2px"><path d="M12 2.5l2.97 6.53 7.03.66-5.31 4.9 1.5 7.16L12 17.9l-6.19 3.85 1.5-7.16-5.31-4.9 7.03-.66L12 2.5Z"></path></svg></span> — their next drink rings up as {{ vm.dlgTabName }}'s round.</p>
       <div style="display:flex;flex-direction:column;gap:var(--space-1);max-height:300px;overflow-y:auto">
         <div v-for="(t, i) in vm.roundTabs" :key="i" style="display:flex;align-items:center;gap:var(--space-2);border:1px solid var(--color-divider);padding:2px var(--space-2)">
           <span style="font-size:16px">{{ t.name }}</span>
-          <span v-if="t.isPayer" class="tag tag-outline">this tab</span>
           <span style="margin-left:auto;display:inline-flex;align-items:center;gap:2px">
             <button type="button" class="btn btn-ghost" @click="t.dec" aria-label="fewer" style="min-width:44px;min-height:44px;font-size:20px">−</button>
             <span style="font-family:var(--font-heading);font-size:20px;min-width:26px;text-align:center">{{ t.n }}</span>
@@ -714,7 +750,7 @@ const syncStatusLabel = computed(() => {
             <tr v-for="(r, i) in vm.tabsOverviewRows" :key="i">
               <td style="font-size:15px">{{ r.name }}</td>
               <td><span class="tag" :style="r.statusStyle">{{ r.status }}</span></td>
-              <td style="font-size:13px;color:var(--color-neutral-600)">{{ r.itemsList }}</td>
+              <td style="font-size:13px;color:var(--color-neutral-600)" v-html="r.itemsList"></td>
               <td style="text-align:right">{{ r.total }}</td>
               <td style="text-align:right;font-size:12px;color:var(--color-neutral-600);white-space:nowrap">{{ r.when }}</td>
             </tr>

@@ -80,8 +80,11 @@ function readSheet_(name) {
 }
 
 function writeDay_(summary) {
-  var co = sheet_('Close-out', ['Day', 'Date', 'DateISO', 'Cash sales', 'Card sales', 'Book sales', 'Comps', 'Book pay-downs (cash)', 'Book pay-downs (card)', 'Counted', 'Over/short', 'Deposit', 'Till kept', 'Card batch total']);
-  co.appendRow([summary.d, summary.dateLabel, summary.dayIso, summary.cash, summary.card, summary.book, summary.comps, summary.bookPayCash, summary.bookPayCard, summary.counted, summary.over, summary.deposit, summary.till, summary.cardBatch]);
+  // Appending 'Card tips' at the end rather than inserting it earlier in the
+  // list -- safe for a sheet that already has rows from before this column
+  // existed (new rows just get one more trailing value; nothing shifts).
+  var co = sheet_('Close-out', ['Day', 'Date', 'DateISO', 'Cash sales', 'Card sales', 'Book sales', 'Comps', 'Book pay-downs (cash)', 'Book pay-downs (card)', 'Counted', 'Over/short', 'Deposit', 'Till kept', 'Card batch total', 'Card tips paid out']);
+  co.appendRow([summary.d, summary.dateLabel, summary.dayIso, summary.cash, summary.card, summary.book, summary.comps, summary.bookPayCash, summary.bookPayCard, summary.counted, summary.over, summary.deposit, summary.till, summary.cardBatch, summary.cardTips || 0]);
 
   var sales = sheet_('Sales', ['Day', 'Hour', 'Product', 'Category', 'Customer', 'Qty', 'Price', 'Payment']);
   (summary.salesRows || []).forEach(function (r) {

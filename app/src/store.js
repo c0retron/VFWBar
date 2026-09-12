@@ -5,6 +5,7 @@
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
 import { enqueueDaySync, enqueueProductsSync, enqueueShoppingListSync } from './sync.js';
+import { printTabReceipt, printDaySummary, printDrawerBills } from './printer.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
@@ -12,6 +13,16 @@ const DAY = 864e5;
 // How many drink-units one shopping-order unit represents -- beer/soda come
 // in 24-packs, liquor and wine get poured from one bottle. Just a starting
 // default per category; adjustable per product in Admin.
+// The photo evidence for the tab-overlap bug also showed a row of garbled
+// blue dots where gold stars should be -- the ★ Unicode glyph almost
+// certainly isn't in whatever font this WebView falls back to (consistent
+// with its history of gaps: color-mix(), ES modules). An inline SVG can't
+// fail to render the same way a missing glyph can, so every ★ usage below
+// is this icon instead, spliced into strings and rendered via v-html in
+// App.vue rather than as plain text.
+const STAR_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:inline;vertical-align:-2px"><path d="M12 2.5l2.97 6.53 7.03.66-5.31 4.9 1.5 7.16L12 17.9l-6.19 3.85 1.5-7.16-5.31-4.9 7.03-.66L12 2.5Z"/></svg>';
+function starIcons(n) { return STAR_SVG.repeat(n); }
+
 function restockUnitFor(cat) {
   if (cat === 'Beer' || cat === 'Soda') return 24;
   if (cat === 'Liquor') return 12;
@@ -478,7 +489,23 @@ function renderVals() {
       const prod = db.products.find((p) => p.id === g.prodId);
       return { name: g.name, qty: g.qty, add: () => { if (prod) store.addItem(t.id, prod); } };
     });
-    return { name: t.name, stars: '★'.repeat(Math.min((t.credits || []).length, 6)), total: fmt(store.tabTotal(t)), meta: t.items.reduce((a, i) => a + i.qty, 0) + ' items · opened ' + store.fmtTime(t.openedAt), hasBook: !!c && Math.abs(bal) >= 0.01, bookBal: fmt(bal), drinkLines, hasDrinkLines: drinkLines.length > 0, open: () => set({ activeTabId: t.id, cat: 'All' }) };
+    return { name: t.name, stars: starIcons(Math.min((t.credits || []).length, 6)), total: fmt(store.tabTotal(t)), meta: t.items.reduce((a, i) => a + i.qty, 0) + ' items · opened ' + store.fmtTime(t.openedAt), hasBook: !!c && Math.abs(bal) >= 0.01, bookBal: fmt(bal), drinkLines, hasDrinkLines: drinkLines.length > 0, drinkLineCount: drinkLines.length, open: () => set({ activeTabId: t.id, cat: 'All' }) };
+  });
+  // Fixed 3 columns, each an independent vertical stack -- not CSS grid rows,
+  // which on this WebView's history of quirky CSS support is the more likely
+  // culprit for the overlap seen with a lot of tabs/items than anything in
+  // this app's own markup. A column only grows from its own cards, never
+  // pushed around by a tall card in a neighboring column. Greedy
+  // shortest-column-first keeps the three columns roughly balanced instead
+  // of naive round-robin, which can end up lopsided when tabs vary a lot in
+  // item count (see the photo: some tabs with 3 items, others with 0).
+  const tabColumns = [[], [], []];
+  const colHeight = [0, 0, 0];
+  tabCards.forEach((card) => {
+    let idx = 0;
+    for (let k = 1; k < 3; k++) if (colHeight[k] < colHeight[idx]) idx = k;
+    tabColumns[idx].push(card);
+    colHeight[idx] += 60 + card.drinkLineCount * 36;
   });
   // "Regulars" is derived, not admin-managed: whoever has actually visited in
   // the last 30 days, most-frequent first. allCustomersSorted (all-time,
@@ -518,7 +545,7 @@ function renderVals() {
       detEmpty: activeTab.items.length === 0,
       detItems: activeTab.items.map((i) => {
         const locked = !!(i.covered || i.linkId || i.selfRound);
-        const note = i.covered ? '★ from ' + i.roundFrom : i.forName ? 'for ' + i.forName + (i.linkId ? ' ★' : '') : i.selfRound ? '★ round' : '';
+        const note = i.covered ? STAR_SVG + ' from ' + i.roundFrom : i.forName ? 'for ' + i.forName + (i.linkId ? ' ' + STAR_SVG : '') : i.selfRound ? STAR_SVG + ' round' : '';
         return {
           qty: i.qty, name: i.name, hasNote: !!note, note,
           noteCol: locked ? '#7a5c12' : 'var(--color-neutral-600)',
@@ -544,10 +571,10 @@ function renderVals() {
     const usualProds = c ? store.usualsFor(c.id) : [];
     det.hasUsuals = usualProds.length > 0;
     const nCred = (activeTab.credits || []).length;
-    det.detStars = '★'.repeat(Math.min(nCred, 6));
+    det.detStars = starIcons(Math.min(nCred, 6));
     det.hasCredits = nCred > 0;
     const crNames = Array.from(new Set((activeTab.credits || []).map((cr) => cr.fromName)));
-    det.creditBanner = '★ ' + nCred + (nCred === 1 ? ' round drink waiting' : ' round drinks waiting') + ' (from ' + crNames.join(', ') + '). The next drinks added use a star automatically — or tap ★ Apply on a drink already on the tab.';
+    det.creditBanner = STAR_SVG + ' ' + nCred + (nCred === 1 ? ' round drink waiting' : ' round drinks waiting') + ' (from ' + crNames.join(', ') + '). The next drinks added use a star automatically — or tap ' + STAR_SVG + ' Apply on a drink already on the tab.';
     det.usualsTitle = activeTab.name + "'s usuals";
     det.usuals = usualProds.map((p) => ({ label: p.name + ' · ' + fmt(p.price), add: () => store.addItem(activeTab.id, p) }));
   }
@@ -646,7 +673,12 @@ function renderVals() {
   const bp = db.todayBookPays || [];
   const bookPayCash = sum(bp.filter((x) => x.method === 'cash'), (x) => x.amount);
   const bookPayCard = sum(bp.filter((x) => x.method === 'card'), (x) => x.amount);
-  const expected = store.till() + cashSales + bookPayCash;
+  const cardTips = db.cardTips || 0;
+  // Card tips get paid out to the bartender in cash from the drawer at
+  // close-out (the money itself came in on the card reader, not into the
+  // till) -- expected drawer cash needs to come down by that amount too, or
+  // a legitimate tip payout would show up as an unexplained "short."
+  const expected = store.till() + cashSales + bookPayCash - cardTips;
   const coRows = [
     { label: 'Cash sales', amt: fmt(cashSales), col: 'inherit', wt: '500' },
     { label: 'Card sales', amt: fmt(cardSales), col: 'inherit', wt: '500' },
@@ -655,6 +687,7 @@ function renderVals() {
     { label: 'Book pay-downs · card', amt: fmt(bookPayCard), col: 'var(--color-neutral-600)', wt: '400' },
     { label: 'Comps given (full value)', amt: fmt(compValTotal), col: 'var(--color-neutral-600)', wt: '400' },
     { label: 'Till change (start of day)', amt: fmt(store.till()), col: 'var(--color-neutral-600)', wt: '400' },
+    { label: 'Card tips (cash out to bartender)', amt: fmt(-cardTips), col: 'var(--color-neutral-600)', wt: '400' },
   ];
   const denoms = [100, 50, 20, 10, 5, 1];
   const billRows = denoms.map((dn) => ({
@@ -681,12 +714,14 @@ function renderVals() {
     const summary = {
       d: DN, dateLabel: new Date(store.date(DN)).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
       cash: cashSales, card: cardSales, book: bookSales, comps: compValTotal, bookPayCash, bookPayCard,
-      counted, over, deposit: depTotal, till: keepTotal, cardBatch: cardSales + bookPayCard,
+      counted, over, deposit: depTotal, till: keepTotal, cardBatch: cardSales + bookPayCard, cardTips,
     };
     store.closeDay(summary);
+    printDaySummary(summary).catch(() => {});
+    printDrawerBills(denoms, plan.keep, keepTotal).catch(() => {});
   };
   const itemsListFor = (items) => (items || []).map((i) => {
-    const note = i.covered ? ' ★from ' + i.roundFrom : i.comp ? ' (comp)' : '';
+    const note = i.covered ? ' ' + STAR_SVG + 'from ' + i.roundFrom : i.comp ? ' (comp)' : '';
     return i.qty + '× ' + i.name + note;
   }).join(', ') || '—';
   const tabsOverviewRows = openTabs.map((t) => ({
@@ -766,7 +801,7 @@ function renderVals() {
       tipCustom: S.tipCustom, onTipCustom: (e) => set({ tipCustom: e.target.value }),
       cardChargeLabel: fmt(total + tip),
       dlgTabName: activeTab.name, dlgTotal: fmt(total),
-      dlgItemsSummary: activeTab.items.reduce((a, i) => a + i.qty, 0) + ' items' + (roundCharge > 0 ? ' + ' + givenOut + ' ★ round' : ''),
+      dlgItemsSummary: activeTab.items.reduce((a, i) => a + i.qty, 0) + ' items' + (roundCharge > 0 ? ' + ' + givenOut + ' ' + STAR_SVG + ' round' : ''),
       payOpts: methods.map((m) => ({ label: m[1], on: S.payMethod === m[0], pick: () => set({ payMethod: m[0] }) })),
       payCash: S.payMethod === 'cash', payCard: S.payMethod === 'card', payBook: S.payMethod === 'book',
       tenderBtns: tenderVals.map((v) => ({ label: '$' + v, bc: S.tender === v && S.tenderCustom === '' ? 'var(--color-accent)' : 'var(--color-divider)', pick: () => set({ tender: v, tenderCustom: '' }) })),
@@ -775,11 +810,28 @@ function renderVals() {
       bookPreview: c ? 'Puts ' + fmt(total) + ' on ' + c.name + "'s page. New balance: " + fmt(bal + total) + '.' : '',
       confirmCloseDisabled: S.payMethod === 'cash' && tender != null && tender < total,
       confirmCloseLabel: S.payMethod === 'cash' ? 'Take cash' : S.payMethod === 'card' ? 'Card done' : 'On the book',
-      confirmClose: () => store.settleTab(activeTab, S.payMethod, tender, S.payMethod === 'card' ? tip : 0),
+      confirmClose: () => {
+        const method = S.payMethod, cardTip = method === 'card' ? tip : 0;
+        // Printing happens after settleTab() commits, and never blocks or
+        // throws into this handler -- a printer being off/out of paper
+        // should never stop a tab from actually closing.
+        const receiptItems = activeTab.items.filter((i) => !i.covered).map((i) => ({
+          qty: i.qty, name: i.name, line: i.comp ? 0 : i.price * i.qty,
+          note: i.comp ? 'COMP' : i.forName ? 'for ' + i.forName : '',
+        }));
+        store.settleTab(activeTab, method, tender, cardTip);
+        printTabReceipt({
+          dateLabel: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          timeLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          name: activeTab.name, items: receiptItems, total,
+          methodLabel: method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'The Book',
+          tip: cardTip, change: method === 'cash' && tender != null ? tender - total : null,
+        }).catch(() => {});
+      },
       closeCreditWarn: givenOut > 0,
       closeCreditWarnText: lastDrink
-        ? '★ ' + givenOut + (givenOut === 1 ? ' round drink' : ' round drinks') + ' not picked up yet — adding ' + givenOut + ' × ' + fmt(lastDrink.price) + ' (' + lastDrink.name + ', their last drink). Stars stay good; if the drink picked costs more, the difference is on the house.'
-        : '★ ' + givenOut + (givenOut === 1 ? ' round drink' : ' round drinks') + " not picked up yet — nothing on this tab to price them from, so they're on the house.",
+        ? STAR_SVG + ' ' + givenOut + (givenOut === 1 ? ' round drink' : ' round drinks') + ' not picked up yet — adding ' + givenOut + ' × ' + fmt(lastDrink.price) + ' (' + lastDrink.name + ', their last drink). Stars stay good; if the drink picked costs more, the difference is on the house.'
+        : STAR_SVG + ' ' + givenOut + (givenOut === 1 ? ' round drink' : ' round drinks') + " not picked up yet — nothing on this tab to price them from, so they're on the house.",
     });
   }
   if (dlg.kind === 'transfer' && activeTab) {
@@ -812,18 +864,22 @@ function renderVals() {
   }
   if (dlg.kind === 'round' && activeTab) {
     const counts = dlg.counts || {};
-    const totalPeople = openTabs.reduce((a, t) => a + (counts[t.id] || 0), 0);
+    // Buying a round is for other people -- the payer's own tab is excluded
+    // entirely rather than just left at 0, so there's no way to accidentally
+    // give yourself a star while buying for the room.
+    const roundTargets = openTabs.filter((t) => t.id !== activeTab.id);
+    const totalPeople = roundTargets.reduce((a, t) => a + (counts[t.id] || 0), 0);
     Object.assign(dlgVals, {
       dlgTabName: activeTab.name,
-      roundTabs: openTabs.map((t) => ({
-        name: t.name, isPayer: t.id === activeTab.id, n: String(counts[t.id] || 0),
+      roundTabs: roundTargets.map((t) => ({
+        name: t.name, n: String(counts[t.id] || 0),
         inc: () => set({ dlg: Object.assign({}, dlg, { counts: Object.assign({}, counts, { [t.id]: (counts[t.id] || 0) + 1 }) }) }),
         dec: () => set({ dlg: Object.assign({}, dlg, { counts: Object.assign({}, counts, { [t.id]: Math.max(0, (counts[t.id] || 0) - 1) }) }) }),
       })),
       roundCount: totalPeople + (totalPeople === 1 ? ' star' : ' stars'),
       roundConfirmDisabled: totalPeople === 0,
       roundConfirm: () => {
-        store.mut((d) => { openTabs.forEach((t) => { const nn = counts[t.id] || 0; const tt = d.tabs.find((x) => x.id === t.id); for (let k = 0; k < nn; k++) tt.credits.push({ id: store.uid(), fromName: activeTab.name, fromTabId: activeTab.id }); }); });
+        store.mut((d) => { roundTargets.forEach((t) => { const nn = counts[t.id] || 0; const tt = d.tabs.find((x) => x.id === t.id); for (let k = 0; k < nn; k++) tt.credits.push({ id: store.uid(), fromName: activeTab.name, fromTabId: activeTab.id }); }); });
         set({ dlg: null });
       },
     });
@@ -938,6 +994,7 @@ function renderVals() {
         { label: 'Put on the books', val: fmt(sm.book), wt: '400' },
         { label: 'Comps given', val: fmt(sm.comps), wt: '400' },
         { label: 'Drawer counted', val: fmt(sm.counted) + (Math.abs(sm.over) < 0.005 ? ' (balanced)' : sm.over > 0 ? ' (over ' + fmt(sm.over) + ')' : ' (short ' + fmt(-sm.over) + ')'), wt: '400' },
+        { label: 'Card tips paid out to bartender', val: fmt(sm.cardTips || 0), wt: '400' },
         { label: 'Till kept for tomorrow', val: fmt(sm.till), wt: '500' },
         { label: 'CASH DEPOSIT', val: fmt(sm.deposit), wt: '700' },
       ],
@@ -960,7 +1017,7 @@ function renderVals() {
     viewTabsList: S.view === 'tabs' && !activeTab, viewTabDetail: S.view === 'tabs' && !!activeTab,
     viewBook: S.view === 'book', viewSales: S.view === 'sales', viewClose: S.view === 'close', viewAdmin: S.view === 'admin',
     tabsHint: openTabs.length ? 'tap a tab to add drinks or close out' : '', hasTabs: openTabs.length > 0, noTabs: openTabs.length === 0,
-    tabCards, regularBtns,
+    tabCards, tabColumns, regularBtns,
     startName: S.startName, onStartName: (e) => set({ startName: e.target.value }),
     onStartKey: (e) => { if (e.key === 'Enter') startNamed(); },
     startNamed, guestLabel: 'Walk-in — Guest ' + db.guestSeq,
@@ -974,6 +1031,7 @@ function renderVals() {
     catRows, shopRows, custPanel, custPanelTitle, custStats,
     coDate: 'Day ' + DN + ' — ' + new Date(store.date(DN)).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
     coRows, coExpected: fmt(expected), coCardBatch: fmt(cardSales + bookPayCard),
+    hasCardTips: cardTips > 0, coCardTips: fmt(cardTips),
     billRows, countedLabel: fmt(counted), overLabel, overStyle,
     tillTargetLabel: fmt(store.till()), depRows, keepTotal: fmt(keepTotal), depTotal: fmt(Math.max(depTotal, 0)),
     hasDepNote, depositNote,
