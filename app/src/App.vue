@@ -562,6 +562,7 @@ const syncStatusLabel = computed(() => {
       </div>
       <p v-if="vm.payBook" class="dialog-body" style="margin:0">{{ vm.bookPreview }}</p>
       <p v-if="vm.closeCreditWarn" class="dialog-body" style="margin:0;color:#7a5c12" v-html="vm.closeCreditWarnText"></p>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer"><input type="checkbox" :checked="vm.printReceipt" @change="vm.onPrintReceipt" style="width:18px;height:18px">Print a receipt</label>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Cancel</button>
         <button type="button" class="btn btn-primary blueprint" @click="vm.confirmClose" :disabled="vm.confirmCloseDisabled" style="min-height:48px;padding:0 var(--space-4)">
@@ -624,7 +625,10 @@ const syncStatusLabel = computed(() => {
         </table>
       </div>
       <div style="display:flex;justify-content:space-between;font-family:var(--font-heading);font-size:20px"><span>Balance</span><span>{{ vm.ledgerBal }}</span></div>
-      <div class="dialog-actions"><button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Close</button></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" @click="vm.printLedger" style="min-height:48px">Print ledger</button>
+        <button type="button" class="btn btn-ghost" @click="vm.closeDlg" style="min-height:48px">Close</button>
+      </div>
     </div>
 
     <div v-if="vm.dlgBookAct" class="dialog blueprint" @click="vm.eatClick" style="background:var(--color-bg)">

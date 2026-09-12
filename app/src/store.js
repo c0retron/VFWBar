@@ -5,7 +5,7 @@
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
 import { enqueueDaySync, enqueueProductsSync, enqueueShoppingListSync } from './sync.js';
-import { printTabReceipt, printDaySummary, printDrawerBills } from './printer.js';
+import { printTabReceipt, printDaySummary, printDrawerBills, printLedgerReceipt } from './printer.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
@@ -35,7 +35,7 @@ class PosStore {
     this.state = reactive({
       view: 'tabs', activeTabId: null, dlg: null, cat: 'All', salesCust: 'all',
       startName: '', tender: null, tenderCustom: '', payMethod: 'cash',
-      bookMethod: 'cash', bookAmount: '', bookNote: '', ep: null, tip: 0, tipCustom: '',
+      bookMethod: 'cash', bookAmount: '', bookNote: '', ep: null, tip: 0, tipCustom: '', printReceipt: false,
       bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 },
     });
     this.db = reactive(this.load());
@@ -565,7 +565,7 @@ function renderVals() {
       detTotal: fmt(store.tabTotal(activeTab)),
       detHasComp: compVal > 0, detCompNote: fmt(compVal) + ' comped (tracked at full value)',
       backToTabs: () => set({ activeTabId: null }),
-      openCloseDialog: () => set({ dlg: { kind: 'close' }, payMethod: 'cash', tender: null, tenderCustom: '', tip: 0, tipCustom: '' }),
+      openCloseDialog: () => set({ dlg: { kind: 'close' }, payMethod: 'cash', tender: null, tenderCustom: '', tip: 0, tipCustom: '', printReceipt: false }),
       openRound: () => set({ dlg: { kind: 'round', counts: db.tabs.reduce((a, t) => { a[t.id] = 1; return a; }, {}) } }),
     };
     const usualProds = c ? store.usualsFor(c.id) : [];
@@ -716,9 +716,14 @@ function renderVals() {
       cash: cashSales, card: cardSales, book: bookSales, comps: compValTotal, bookPayCash, bookPayCard,
       counted, over, deposit: depTotal, till: keepTotal, cardBatch: cardSales + bookPayCard, cardTips,
     };
+    // closeDay() wipes db.closedTabs for the next day -- snapshot it first so
+    // the day-summary receipt can list who closed out and how they paid.
+    const closedTabsSnapshot = db.closedTabs.slice();
+    const countedBillsSnapshot = Object.assign({}, S.bills);
+    const keepBillsSnapshot = Object.assign({}, plan.keep);
     store.closeDay(summary);
-    printDaySummary(summary).catch(() => {});
-    printDrawerBills(denoms, plan.keep, keepTotal).catch(() => {});
+    printDaySummary(summary, closedTabsSnapshot, denoms, countedBillsSnapshot, keepBillsSnapshot).catch(() => {});
+    printDrawerBills(denoms, keepBillsSnapshot, keepTotal, summary.dateLabel).catch(() => {});
   };
   const itemsListFor = (items) => (items || []).map((i) => {
     const note = i.covered ? ' ' + STAR_SVG + 'from ' + i.roundFrom : i.comp ? ' (comp)' : '';
@@ -810,23 +815,28 @@ function renderVals() {
       bookPreview: c ? 'Puts ' + fmt(total) + ' on ' + c.name + "'s page. New balance: " + fmt(bal + total) + '.' : '',
       confirmCloseDisabled: S.payMethod === 'cash' && tender != null && tender < total,
       confirmCloseLabel: S.payMethod === 'cash' ? 'Take cash' : S.payMethod === 'card' ? 'Card done' : 'On the book',
+      printReceipt: S.printReceipt, onPrintReceipt: (e) => set({ printReceipt: e.target.checked }),
       confirmClose: () => {
         const method = S.payMethod, cardTip = method === 'card' ? tip : 0;
+        const wantsReceipt = S.printReceipt;
         // Printing happens after settleTab() commits, and never blocks or
         // throws into this handler -- a printer being off/out of paper
-        // should never stop a tab from actually closing.
+        // should never stop a tab from actually closing. Opt-in per
+        // transaction (the checkbox above), not automatic on every close.
         const receiptItems = activeTab.items.filter((i) => !i.covered).map((i) => ({
           qty: i.qty, name: i.name, line: i.comp ? 0 : i.price * i.qty,
           note: i.comp ? 'COMP' : i.forName ? 'for ' + i.forName : '',
         }));
         store.settleTab(activeTab, method, tender, cardTip);
-        printTabReceipt({
-          dateLabel: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          timeLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-          name: activeTab.name, items: receiptItems, total,
-          methodLabel: method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'The Book',
-          tip: cardTip, change: method === 'cash' && tender != null ? tender - total : null,
-        }).catch(() => {});
+        if (wantsReceipt) {
+          printTabReceipt({
+            dateLabel: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            timeLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+            name: activeTab.name, items: receiptItems, total,
+            methodLabel: method === 'cash' ? 'Cash' : method === 'card' ? 'Card' : 'The Book',
+            tip: cardTip, change: method === 'cash' && tender != null ? tender - total : null,
+          }).catch(() => {});
+        }
       },
       closeCreditWarn: givenOut > 0,
       closeCreditWarnText: lastDrink
@@ -892,7 +902,20 @@ function renderVals() {
       const kindLabel = e.kind === 'charge' ? 'Charge' : e.kind === 'payment' ? 'Payment (' + (e.method || 'cash') + ')' : 'Credit';
       return { date: store.fmtDate(e.ts), note: kindLabel + (e.note ? ' — ' + e.note : ''), amt: (e.kind === 'charge' ? '+' : '−') + fmt(e.amount).replace('$', '$'), col: e.kind === 'charge' ? 'inherit' : 'var(--color-accent-700)', bal: fmt(run) };
     }).reverse();
-    Object.assign(dlgVals, { ledgerName: c ? c.name : '', ledgerRows: rows, ledgerBal: c ? (store.bookBal(c) < -0.005 ? fmt(-store.bookBal(c)) + ' credit' : fmt(store.bookBal(c))) : '' });
+    const bal = c ? store.bookBal(c) : 0;
+    Object.assign(dlgVals, {
+      ledgerName: c ? c.name : '', ledgerRows: rows, ledgerBal: c ? (bal < -0.005 ? fmt(-bal) + ' credit' : fmt(bal)) : '',
+      printLedger: () => {
+        if (!c) return;
+        let printRun = 0;
+        const printRows = c.ledger.map((e) => {
+          printRun += e.kind === 'charge' ? e.amount : -e.amount;
+          const kindLabel = e.kind === 'charge' ? 'Charge' : e.kind === 'payment' ? 'Payment (' + (e.method || 'cash') + ')' : 'Credit';
+          return { date: store.fmtDate(e.ts), note: kindLabel + (e.note ? ' - ' + e.note : ''), amount: e.kind === 'charge' ? e.amount : -e.amount, balance: printRun };
+        });
+        printLedgerReceipt(c.name, printRows, bal).catch(() => {});
+      },
+    });
   }
   if (dlg.kind === 'bookAct') {
     const c = store.cust(dlg.custId); const bal = c ? store.bookBal(c) : 0;
