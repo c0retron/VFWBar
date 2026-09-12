@@ -100,7 +100,7 @@ const syncStatusLabel = computed(() => {
       </span>
     </div>
     <div style="display:flex;align-items:center;gap:var(--space-3);margin-left:auto">
-      <a v-for="(n, i) in vm.navItems" :key="i" href="#" :aria-current="n.cur" @click="n.go" style="padding:10px 2px;font-size:15px">{{ n.label }}</a>
+      <a v-for="(n, i) in vm.navItems" :key="i" href="#" class="btn" :aria-current="n.cur" @click="n.go" :style="`min-height:40px;font-size:14px${n.cur ? ';background:var(--color-accent-100);border-color:var(--color-accent)' : ''}`">{{ n.label }}</a>
       <span class="tag tag-accent">{{ vm.openCountLabel }}</span>
       <span style="font-size:12px;letter-spacing:0.08em;color:var(--color-neutral-600)">{{ vm.dayLabel }}</span>
       <button type="button" class="btn btn-ghost" @click="toggleDark" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" style="min-width:36px;min-height:36px;padding:0">
@@ -484,7 +484,7 @@ const syncStatusLabel = computed(() => {
         </table>
       </div>
     </div>
-    <div style="flex:none;width:320px;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
+    <div style="flex:none;width:320px;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:var(--space-3);border-left:1.5px solid var(--color-divider);padding-left:var(--space-4)">
       <h6 style="margin:0;color:var(--color-accent-700)">Settings</h6>
       <div class="field">
         <label>Till change target</label>
