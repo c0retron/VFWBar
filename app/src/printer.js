@@ -41,10 +41,12 @@ const BIG_ON = GS + '!\x11';
 const BIG_OFF = GS + '!\x00';
 const CUT = GS + 'V\x00'; // full cut -- the printer's autocutter handles this on receipt of this command
 
-// Roughly an inch of blank feed at typical thermal line spacing (~8
-// lines/inch at normal text size) -- an estimate, not a measured constant;
-// adjust here if a specific printer runs noticeably long or short.
-const MARGIN = '\n'.repeat(8);
+// Blank feed at typical thermal line spacing (~8 lines/inch at normal text
+// size) -- an estimate, not a measured constant; adjust here if a specific
+// printer runs noticeably long or short. Top is a half inch shorter than
+// bottom per feedback (4 lines vs. 8, ~1/2" vs. ~1").
+const TOP_MARGIN = '\n'.repeat(4);
+const BOTTOM_MARGIN = '\n'.repeat(8);
 
 function row(width, left, right) {
   left = String(left); right = String(right);
@@ -61,7 +63,7 @@ async function sendRaw(body) {
   printerState.status = 'printing';
   try {
     if (!Capacitor.isNativePlatform()) { printerState.status = 'idle'; return; } // web/dev preview -- nothing to send to
-    const text = INIT + MARGIN + body + MARGIN + CUT;
+    const text = INIT + TOP_MARGIN + body + BOTTOM_MARGIN + CUT;
     await EscPosPrinter.printRaw({ ip: cfg.ip, port: Number(cfg.port) || 9100, dataBase64: btoa(text) });
     printerState.status = 'idle';
     printerState.lastPrintAt = Date.now();
