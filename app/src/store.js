@@ -5,7 +5,7 @@
 // buy-a-round/star system, book rules, and close-out math this implements.
 import { reactive, computed } from 'vue';
 import { enqueueDaySync, enqueueProductsSync, enqueueShoppingListSync } from './sync.js';
-import { printTabReceipt, printDaySummary, printDrawerBills, printLedgerReceipt } from './printer.js';
+import { printTabReceipt, printDaySummary, printDrawerBills, printLedgerReceipt, printRestockManifest as printRestockReceipt } from './printer.js';
 
 const KEY = 'vfw_pos_v1';
 const DAY = 864e5;
@@ -74,6 +74,11 @@ class PosStore {
     // products -- liquor has no such cap (shelf space isn't the constraint
     // there), just the existing usage-based suggestion.
     if (db.beerCaseCapacity == null) db.beerCaseCapacity = 20;
+    // Watermark into db.sales for the restock manifest -- everything at or
+    // after this index hasn't been on a printed manifest yet. Backfilled to
+    // the current length (not 0) so upgrading a tablet with real sales
+    // history doesn't dump that whole history onto the first manifest print.
+    if (db.lastRestockCount == null) db.lastRestockCount = db.sales.length;
   }
 
   save() { try { localStorage.setItem(KEY, JSON.stringify(this.db)); } catch (e) { /* storage full/unavailable */ } }
@@ -146,7 +151,7 @@ class PosStore {
       { id: 't2', name: 'Mac', custId: 'c3', openedAt: now - 31 * 6e4, items: [{ id: 'i3', prodId: 'p1', name: 'Budweiser', price: 2.75, qty: 1, comp: false }] },
       { id: 't3', name: 'Guest 1', custId: null, openedAt: now - 12 * 6e4, items: [{ id: 'i4', prodId: 'p5', name: 'Mich Ultra', price: 3, qty: 1, comp: false }, { id: 'i5', prodId: 'p17', name: 'Chips', price: 1, qty: 1, comp: false }] },
     ];
-    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, beerCaseCapacity: 20, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [] };
+    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, beerCaseCapacity: 20, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [], lastRestockCount: sales.length };
   }
 
   bookBal(c) { return c.ledger.reduce((a, e) => a + (e.kind === 'charge' ? e.amount : -e.amount), 0); }
@@ -299,6 +304,9 @@ class PosStore {
       db.guestSeq = 1;
       db.closedTabs = [];
       if (db.sales.length > 6000) db.sales = db.sales.filter((x) => x.d > db.dayNumber - 120);
+      // New day, fresh restock watermark -- also keeps it valid across the
+      // occasional prune above, which can otherwise shift array indices.
+      db.lastRestockCount = db.sales.length;
     });
     this.state.bills = { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 };
     this.state.dlg = { kind: 'dayClosed', summary };
@@ -308,6 +316,10 @@ class PosStore {
     // Piggyback on the daily close so it backs up at least once a day either way.
     enqueueProductsSync(this.db.products.map((p) => ({ name: p.name, cat: p.cat, price: p.price, active: p.active })));
   }
+
+  // Called after 30s idle on any screen besides Tabs or Close-out -- drops
+  // whatever dialog/detail view was open and returns to the main tab screen.
+  idleReset() { Object.assign(this.state, { view: 'tabs', activeTabId: null, dlg: null }); }
 
   depositPlan(counts, target) {
     // Bounded subset-sum: find the till total actually achievable from the bills
@@ -554,7 +566,15 @@ function renderVals() {
           canQty: !locked, locked,
           canComp: !i.covered, canTransfer: !i.covered,
           canApply: hasApplicable && !i.covered && !i.comp && !i.linkId && !i.selfRound,
-          inc: () => store.mut(() => { i.qty++; }),
+          inc: () => store.mut(() => {
+            // A comped line's qty covers the whole comp -- bumping it would
+            // comp the extra drink too. Land the extra unit on a separate
+            // (non-comped) line instead, merging into one if it already exists.
+            if (!i.comp) { i.qty++; return; }
+            const forName = i.forName || '';
+            const ex = activeTab.items.find((o) => o.prodId === i.prodId && !o.comp && !o.covered && !o.selfRound && !o.linkId && (o.forName || '') === forName);
+            if (ex) ex.qty++; else activeTab.items.push({ id: store.uid(), prodId: i.prodId, name: i.name, price: i.price, qty: 1, comp: false, forName });
+          }),
           dec: () => { if (i.qty > 1) store.mut(() => { i.qty--; }); else store.removeLine(activeTab.id, i.id); },
           del: () => store.removeLine(activeTab.id, i.id),
           comp: () => store.mut(() => { i.comp = !i.comp; }),
@@ -737,6 +757,22 @@ function renderVals() {
     itemsList: itemsListFor(ct.items) + (ct.roundNote ? ', ' + ct.roundNote : ''), total: fmt(ct.total), when: 'closed ' + store.fmtTime(ct.closedAt),
   })));
   const openTabsOverview = () => set({ dlg: { kind: 'tabsOverview' } });
+  // Manifest of what's been poured since the last time this was printed (not
+  // just today) -- lets the bartender restock the on-bar fridge/well from the
+  // stock room without recounting everything on hand. Watermark-based so
+  // pressing it twice in a day only lists what moved in between.
+  const printRestockManifest = () => {
+    const from = db.lastRestockCount || 0;
+    const rows = db.sales.slice(from).filter((s) => s.d === DN);
+    const byProd = new Map();
+    rows.forEach((s) => {
+      const cur = byProd.get(s.p);
+      if (cur) cur.qty += s.q; else byProd.set(s.p, { name: (db.products.find((p) => p.id === s.p) || {}).name || s.p, qty: s.q });
+    });
+    const items = Array.from(byProd.values()).sort((a, b) => a.name.localeCompare(b.name));
+    store.mut((d) => { d.lastRestockCount = d.sales.length; });
+    printRestockReceipt(items, new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })).catch(() => {});
+  };
   // Suggests restocking to roughly a 14-day supply at each product's actual
   // sale pace since the last confirmed shopping list (or all-time if there
   // isn't one yet). A fast-mover that ran out gets a big suggestion because
@@ -1060,7 +1096,7 @@ function renderVals() {
     hasDepNote, depositNote,
     hasOpenTabsWarn: openTabs.length > 0, openTabNames: openNames,
     closeDayDisabled: !canClose, closeDayHint, doCloseDay,
-    tabsOverviewRows, openTabsOverview, openShoppingList, openShoppingHistory,
+    tabsOverviewRows, openTabsOverview, printRestockManifest, openShoppingList, openShoppingHistory,
     prodRows, addProduct: () => set({ dlg: { kind: 'editProduct' }, ep: { name: '', price: '', cat: 'Beer', qty: '0', unitsPerSale: '1', restockUnit: String(restockUnitFor('Beer')) } }),
     tillVal: String(db.tillTarget), onTill: (e) => store.mut((d) => { d.tillTarget = Math.max(50, Number(e.target.value) || 200); }),
     beerCapVal: String(db.beerCaseCapacity), onBeerCap: (e) => store.mut((d) => { d.beerCaseCapacity = Math.max(0, Number(e.target.value) || 0); }),

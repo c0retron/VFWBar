@@ -39,6 +39,11 @@ const BOLD_ON = ESC + 'E\x01';
 const BOLD_OFF = ESC + 'E\x00';
 const BIG_ON = GS + '!\x11';
 const BIG_OFF = GS + '!\x00';
+// Double-height only (width stays 1x) -- bumps the body text up without
+// halving how many characters fit per line, so the existing row()/line()
+// math (built for the configured character width) still lines up.
+const SIZE_MED = GS + '!\x01';
+const SIZE_NORMAL = GS + '!\x00';
 const CUT = GS + 'V\x00'; // full cut -- the printer's autocutter handles this on receipt of this command
 
 // Blank feed at typical thermal line spacing (~8 lines/inch at normal text
@@ -103,7 +108,7 @@ export async function printTabReceipt(tab) {
 // same shape as the Close-out screen's bill counter and deposit plan.
 export async function printDaySummary(summary, closedTabs, denoms, countedBills, keepBills) {
   const cfg = loadConfig(); const W = cfg.width || 32;
-  let out = header(W) + BOLD_ON + 'CLOSE-OUT SUMMARY\n' + BOLD_OFF;
+  let out = header(W) + BOLD_ON + 'CLOSE-OUT SUMMARY\n' + BOLD_OFF + SIZE_MED;
   out += summary.dateLabel + '\n' + line(W) + '\n';
   out += row(W, 'Cash sales', money(summary.cash)) + '\n';
   out += row(W, 'Card sales', money(summary.card)) + '\n';
@@ -116,7 +121,10 @@ export async function printDaySummary(summary, closedTabs, denoms, countedBills,
   out += row(W, 'Drawer counted', money(summary.counted)) + '\n';
   out += row(W, summary.over >= 0 ? 'Over' : 'Short', money(Math.abs(summary.over))) + '\n';
   out += BOLD_ON + row(W, 'Till kept', money(summary.till)) + BOLD_OFF + '\n';
-  out += ALIGN_C + BOLD_ON + BIG_ON + '\nDEPOSIT ' + money(summary.deposit) + '\n' + BIG_OFF + BOLD_OFF + ALIGN_L;
+  // BIG_OFF resets the printer's size register to normal (it's the same
+  // command as SIZE_MED/SIZE_NORMAL, just a different value) -- re-apply
+  // SIZE_MED so the rest of the receipt below stays enlarged too.
+  out += ALIGN_C + BOLD_ON + BIG_ON + '\nDEPOSIT ' + money(summary.deposit) + '\n' + BIG_OFF + BOLD_OFF + ALIGN_L + SIZE_MED;
 
   if ((closedTabs || []).length) {
     out += '\n' + BOLD_ON + 'TABS CLOSED TODAY' + BOLD_OFF + '\n' + line(W) + '\n';
@@ -137,7 +145,20 @@ export async function printDaySummary(summary, closedTabs, denoms, countedBills,
     const k = keepBills[dn] || 0;
     if (k > 0) out += row(W, '$' + dn + ' bills', 'x' + k) + '\n';
   });
-  out += BOLD_ON + row(W, 'Till total', money(summary.till)) + BOLD_OFF + '\n';
+  out += BOLD_ON + row(W, 'Till total', money(summary.till)) + BOLD_OFF + '\n' + SIZE_NORMAL;
+  await sendRaw(out);
+}
+
+// items: [{name, qty}], already summed since the last manifest print.
+export async function printRestockManifest(items, dateLabel) {
+  const cfg = loadConfig(); const W = cfg.width || 32;
+  let out = header(W) + BOLD_ON + 'RESTOCK FROM STOCK ROOM\n' + BOLD_OFF;
+  out += dateLabel + '\n' + line(W) + '\n';
+  if (!items.length) {
+    out += 'Nothing sold since the last\nrestock manifest.\n';
+  } else {
+    items.forEach((it) => { out += row(W, it.name, 'x' + it.qty) + '\n'; });
+  }
   await sendRaw(out);
 }
 

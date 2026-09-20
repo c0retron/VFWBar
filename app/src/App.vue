@@ -4,7 +4,7 @@
 // exactly — see src/store.js. Template structure below mirrors the original 1:1
 // (sc-if -> v-if, sc-for -> v-for, {{ }} bindings unchanged) so it stays easy to
 // diff against the reviewed prototype if something looks off.
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { vm, store } from './store.js';
 import { isDark, toggleDark } from './theme.js';
 import { syncState, getConfig, setConfig, retrySync, pullAll, enqueueAllDays, enqueueProductsSync } from './sync.js';
@@ -47,6 +47,27 @@ const printerStatusLabel = computed(() => {
   if (printerState.lastPrintAt) return 'Last printed ' + new Date(printerState.lastPrintAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   return 'Ready — prints automatically on tab close and day close.';
 });
+
+// Bumps the bartender back to the main tab screen after 30s idle on any
+// screen except Tabs or Close-out -- those two are where the bartender
+// actually lingers mid-service; everywhere else (Book, Sales, Admin) is a
+// quick look-up that shouldn't get left open and forgotten.
+const IDLE_MS = 30000;
+let idleTimer = null;
+function armIdleTimer() {
+  clearTimeout(idleTimer);
+  if (store.state.view === 'tabs' || store.state.view === 'close') return;
+  idleTimer = setTimeout(() => store.idleReset(), IDLE_MS);
+}
+onMounted(() => {
+  ['click', 'touchstart', 'keydown'].forEach((ev) => window.addEventListener(ev, armIdleTimer, { passive: true }));
+  armIdleTimer();
+});
+onBeforeUnmount(() => {
+  ['click', 'touchstart', 'keydown'].forEach((ev) => window.removeEventListener(ev, armIdleTimer));
+  clearTimeout(idleTimer);
+});
+watch(() => store.state.view, armIdleTimer);
 
 const restoring = ref(false);
 const restoreStatus = ref('');
@@ -382,7 +403,8 @@ const syncStatusLabel = computed(() => {
       <div style="display:flex;flex-direction:column;gap:var(--space-3)">
         <div style="display:flex;align-items:center;gap:var(--space-2)">
           <h6 style="margin:0;color:var(--color-accent-700)">Day summary</h6>
-          <button type="button" class="btn" @click="vm.openTabsOverview" style="margin-left:auto;min-height:36px;font-size:12px">View all tabs</button>
+          <button type="button" class="btn" @click="vm.printRestockManifest" style="margin-left:auto;min-height:36px;font-size:12px">Restock fridge</button>
+          <button type="button" class="btn" @click="vm.openTabsOverview" style="min-height:36px;font-size:12px">View all tabs</button>
         </div>
         <div class="card blueprint">
           <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
