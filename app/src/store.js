@@ -79,6 +79,7 @@ class PosStore {
     // the current length (not 0) so upgrading a tablet with real sales
     // history doesn't dump that whole history onto the first manifest print.
     if (db.lastRestockCount == null) db.lastRestockCount = db.sales.length;
+    if (!db.dayDates) db.dayDates = {};
   }
 
   save() { try { localStorage.setItem(KEY, JSON.stringify(this.db)); } catch (e) { /* storage full/unavailable */ } }
@@ -86,7 +87,18 @@ class PosStore {
   uid() { return 'x' + (this.db.seq++); }
   fmt(n) { const v = Math.round(n * 100) / 100; return (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2); }
   till() { return this.db.tillTarget || 200; }
-  date(d) { return this.db.epoch - (61 - d) * DAY; }
+  // Midnight (local) of the business date for a moment in time -- anything
+  // before 5am still belongs to the previous night's business day.
+  businessDate(ms) { const x = new Date(ms - 5 * 36e5); x.setHours(0, 0, 0, 0); return x.getTime(); }
+  // Closed days use the real date recorded at close-out; the open day is
+  // today's business date. Only legacy days with no recorded date fall back
+  // to the old one-calendar-day-per-day-number assumption.
+  date(d) {
+    const rec = this.db.dayDates && this.db.dayDates[d];
+    if (rec != null) return rec;
+    if (d === this.db.dayNumber) return this.businessDate(Date.now());
+    return this.db.epoch - (61 - d) * DAY;
+  }
   fmtDate(ts) { return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
   fmtTime(ts) { return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
 
@@ -151,7 +163,7 @@ class PosStore {
       { id: 't2', name: 'Mac', custId: 'c3', openedAt: now - 31 * 6e4, items: [{ id: 'i3', prodId: 'p1', name: 'Budweiser', price: 2.75, qty: 1, comp: false }] },
       { id: 't3', name: 'Guest 1', custId: null, openedAt: now - 12 * 6e4, items: [{ id: 'i4', prodId: 'p5', name: 'Mich Ultra', price: 3, qty: 1, comp: false }, { id: 'i5', prodId: 'p17', name: 'Chips', price: 1, qty: 1, comp: false }] },
     ];
-    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, beerCaseCapacity: 20, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [], lastRestockCount: sales.length };
+    return { v: 1, epoch: E, dayNumber: 61, tillTarget: 200, beerCaseCapacity: 20, guestSeq: 2, seq: 100, products, customers, sales, tabs, todayBookPays, days: [], closedTabs: [], shoppingLists: [], lastRestockCount: sales.length, dayDates: {} };
   }
 
   bookBal(c) { return c.ledger.reduce((a, e) => a + (e.kind === 'charge' ? e.amount : -e.amount), 0); }
@@ -281,7 +293,10 @@ class PosStore {
       // this back correctly, and dateLabel's locale-formatted string isn't a
       // safe bet across the Apps Script V8 runtime and whatever WebView the
       // tablet has.
-      summary.dayIso = new Date(dayStart).toISOString().slice(0, 10);
+      const ds = new Date(dayStart);
+      summary.dayIso = ds.getFullYear() + '-' + String(ds.getMonth() + 1).padStart(2, '0') + '-' + String(ds.getDate()).padStart(2, '0');
+      if (!db.dayDates) db.dayDates = {};
+      db.dayDates[DN] = dayStart;
       // Snapshot this day's detail into the summary, resolved to human-readable
       // names rather than internal ids — this is what gets synced to Sheets,
       // and db.sales gets pruned below, so the summary is the only durable
@@ -462,6 +477,9 @@ class PosStore {
       db.guestSeq = 1;
       db.days = [];
       db.shoppingLists = shoppingLists;
+      db.dayDates = {};
+      oldDays.forEach((oldD) => { db.dayDates[dayMap[oldD]] = dayDate[oldD]; });
+      db.lastRestockCount = sales.length;
       db.seq = 1000;
     });
     Object.assign(this.state, { view: 'tabs', activeTabId: null, dlg: null, bills: { 1: 0, 5: 0, 10: 0, 20: 0, 50: 0, 100: 0 } });
